@@ -1,0 +1,55 @@
+WinterStatic yt-dlp Downloader - third-party runtime notice
+===========================================================
+
+Project:
+https://github.com/WinterStatic/yt-dlp-WinterStatic
+
+The WinterStatic native frontend source is licensed separately under the MIT
+License in LICENSE.
+
+The frontend executable does not contain or link against yt-dlp, FFmpeg, or
+Microsoft Edge. It launches those programs as separate runtime tools when they
+are available.
+
+THIRD-PARTY PROJECTS / RUNTIMES
+------------------------------
+
+yt-dlp
+  Project: https://github.com/yt-dlp/yt-dlp
+  Used as the media extraction / download engine. The portable package may
+  contain two official upstream stable executables: the latest stable primary
+  backend for normal/public extraction and a separate authenticated-YouTube
+  backend. The authenticated slot normally follows the latest stable too, except
+  exact versions on WinterStatic's authenticated-quality blacklist (currently
+  2026.08.19) fall back to the known-good 2026.07.04 build. Nightly builds are
+  not selected by the release builder. Both remain separate third-party
+  executables and retain yt-dlp's upstream license/copyright terms.
+
+FFmpeg
+  Project: https://ffmpeg.org/
+  Windows build source used by build-native.bat: https://www.gyan.dev/ffmpeg/builds/
+  Used by yt-dlp for stream merging, audio extraction, and related processing.
+  When a local portable copy is absent, build-native.bat downloads the Gyan
+  release essentials ZIP and copies its ffmpeg/ffprobe/ffplay executables into
+  Tools\FFmpeg\bin.
+
+Microsoft Edge
+  Used when installed on Windows as the dedicated account browser and preferred
+  visible runtime-network observer. WinterStatic does not redistribute Edge;
+  it launches the system installation with a separate user-data directory under
+  Tools\BrowserProfile.
+
+BINARY REDISTRIBUTION
+---------------------
+
+The source repository intentionally excludes Tools/ so local third-party
+binaries and personal browser data are not accidentally committed.
+
+A public Full Portable release that includes yt-dlp, FFmpeg, or any other
+third-party binary must comply with the license / notice / source obligations
+of the exact files distributed in that release. Microsoft Edge is not intended
+to be bundled in the portable package.
+
+Before publishing a Full Portable binary asset, follow
+PUBLIC-RELEASE-CHECKLIST.md and record the exact versions, binary sources, and
+applicable notices for the runtime package actually being shipped.

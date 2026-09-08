@@ -1,0 +1,26 @@
+# MSVC/build outputs
+*.obj
+*.res
+*.pdb
+WinterStatic-yt-dlp-Downloader.exe
+
+# Generated portable packages
+WinterStatic-yt-dlp-Downloader-*-portable/
+WinterStatic-yt-dlp-Downloader-*-portable-*/
+WinterStatic-yt-dlp-Downloader-*-portable.zip
+WinterStatic-yt-dlp-Downloader-*-source.zip
+
+# Local third-party runtime tools
+Tools/
+
+# IDE/local files
+.vs/
+x64/
+Debug/
+Release/
+*.user
+*.suo
+
+# OS clutter
+Thumbs.db
+Desktop.ini
