@@ -6,6 +6,8 @@
 
 WinterStatic yt-dlp Downloader is a native C++17 / Win32 frontend for [`yt-dlp`](https://github.com/yt-dlp/yt-dlp). It provides a compact Windows GUI, FFmpeg support, authenticated YouTube downloads through a dedicated Microsoft Edge profile, and a visible PowerShell task window.
 
+It also adds its own recovery layer. For some pages that yt-dlp cannot handle directly, WinterStatic can scan page metadata and media references, then optionally use a visible browser sweep to find streams exposed at runtime. Recovered media is passed back to yt-dlp for the actual download.
+
 Project: https://github.com/WinterStatic/yt-dlp-WinterStatic
 
 ## FEATURES
@@ -262,7 +264,7 @@ Before publishing a portable package containing third-party binaries, check `THI
 
 ## VERSION HISTORY
 
-0.1.37 is the first public GitHub release. Earlier 0.1.x versions were private development builds.
+0.1.37 is the first public GitHub release.
 
 ### 0.1.37 - STABLE YT-DLP POLICY, RELEASE PACKAGING, HOVER HELP
 
