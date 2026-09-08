@@ -5,7 +5,7 @@
 ![WinterStatic yt-dlp Downloader](yt-dlp_winterstatic.png)
 
 
-### 0.1.37 — STABLE-BACKEND POLICY + HOVER HELP
+### 0.1.37 - STABLE-BACKEND POLICY + HOVER HELP
 
 - The primary `yt-dlp.exe` now deliberately tracks the **latest official stable** release whenever the portable package is built or the GUI **Update** action is used. Nightly builds are not selected for the primary slot.
 - The authenticated YouTube helper is now **stable-only rather than permanently pinned**. It follows the latest stable release unless that exact release is on WinterStatic's authenticated-quality blacklist. The initial blacklist contains **2026.08.19**; while that remains the latest stable, authenticated YouTube falls back to the known-good **2026.07.04** build. Later stable releases are allowed automatically unless testing proves they also need blacklisting.
@@ -17,7 +17,7 @@
 - Download selection, authentication triggering, progress handling, CDP candidate discovery, and the 0.1.36 restart-aware progress clamp are otherwise unchanged.
 
 
-### 0.1.36 — MID-ATTEMPT RESTART-AWARE PROGRESS
+### 0.1.36 - MID-ATTEMPT RESTART-AWARE PROGRESS
 
 - Refines the 0.1.35 monotonic GUI progress clamp so a real yt-dlp restart *inside the same attempt* cannot leave the progress bar pinned at an old high percentage while the transfer recounts from near zero.
 - Tracks the last `downloaded_bytes` value alongside the displayed-percent high-water mark. Normal DASH/HLS estimate wobble leaves downloaded bytes increasing, so the anti-jitter clamp still holds; a substantial byte-count drop releases the clamp and lets the GUI reflect the genuine restart.
@@ -25,7 +25,7 @@
 - This remains display-layer only: yt-dlp output, download/retry behavior, authentication, format selection, split backends, Browser sweep/CDP, updater logic, and PowerShell generation are unchanged from 0.1.35.
 
 
-### 0.1.35 — MONOTONIC PROGRESS DISPLAY + SMALL CLEANUP
+### 0.1.35 - MONOTONIC PROGRESS DISPLAY + SMALL CLEANUP
 
 - Smooths the GUI percentage for fragmented DASH/HLS downloads by keeping a per-pass high-water mark. If yt-dlp revises its estimated total upward and reports a lower percentage, WinterStatic holds the last displayed value instead of making the progress bar/detail move backwards.
 - The high-water mark resets for every new download stream/pass, so a separate audio pass can correctly begin near 0% after a video pass reaches 100%.
@@ -34,7 +34,7 @@
 - No changes to authentication, split yt-dlp backend routing, Browser sweep/CDP discovery, format selection, or updater behavior from 0.1.34.
 
 
-### 0.1.34 — DEDICATED EDGE PROFILE SAFETY FIX
+### 0.1.34 - DEDICATED EDGE PROFILE SAFETY FIX
 
 - Fixes a porting regression in `AccountBrowserProfileInUse()`: the Edge account-profile gate no longer looks for a Firefox/LibreWolf-style `lockfile` that Chromium does not create on Windows.
 - WinterStatic now checks running Edge process command lines for the exact dedicated `--user-data-dir=<Tools\BrowserProfile>` argument. This means **only the WinterStatic account browser** blocks cookie/session checks, Reset Login, or an authenticated download; the user's normal Edge windows can remain open.
@@ -42,7 +42,7 @@
 - No download, yt-dlp routing, browser-sweep/CDP, format-selection, or updater behavior changed from 0.1.33.
 - The 0.1.33 `Missing`/`Detected` status fix and `+A--` diagnostic remain unchanged.
 
-### 0.1.33 — MAINSTREAM RELEASE
+### 0.1.33 - MAINSTREAM RELEASE
 
 - Promotes the tested 0.2.x development line into the mainstream 0.1.x release series.
 - Keeps the split yt-dlp backend policy: current stable for normal/public downloads and pinned **2026.07.04** for authenticated YouTube compatibility.
@@ -54,7 +54,7 @@
 
 The 0.2.x entries below are retained as development-history notes for the work that led to this mainstream build.
 
-### 0.2.69experimental — COMPACT DUAL VERSION LABEL + TOOLS ROW TIGHTENING
+### 0.2.69experimental - COMPACT DUAL VERSION LABEL + TOOLS ROW TIGHTENING
 
 - Keeps the 0.2.68 browser-sweep opt-in, split yt-dlp routing, updater behavior, and recovery logic unchanged.
 - The Tools yt-dlp status now uses `2026.08.19+A2026.07.04`: the `A` explicitly marks the authenticated backend while removing spaces and punctuation that were consuming the last few pixels.
@@ -62,14 +62,14 @@ The 0.2.x entries below are retained as development-history notes for the work t
 - This is a UI-only refinement; no download, authentication, browser-sweep, or yt-dlp selection behavior changed.
 
 
-### 0.2.68experimental — FULL DUAL YT-DLP VERSION DISPLAY
+### 0.2.68experimental - FULL DUAL YT-DLP VERSION DISPLAY
 
 - Keeps the 0.2.67 browser-sweep opt-in and split yt-dlp backend behavior unchanged.
 - The compact Tools status now shows both complete versions, for example `2026.08.19 / A:2026.07.04`, instead of dropping the common year.
 - No downloader, authentication, recovery, update, or browser-observer logic changed in this build.
 
 
-### 0.2.68experimental — BROWSER SWEEP OPT-IN + COMPACT DUAL VERSION STATUS
+### 0.2.68experimental - BROWSER SWEEP OPT-IN + COMPACT DUAL VERSION STATUS
 
 - Adds a compact **Browser sweep** checkbox in the Run panel. It is **off by default** and persisted as `BrowserAssistedRecovery=0/1` in `settings.ini`.
 - With Browser sweep off, WinterStatic still performs the normal yt-dlp attempts, resilience retries, and static/captured-page discovery. It simply skips the final visible temporary-browser CDP/network sweep.
@@ -77,27 +77,27 @@ The 0.2.x entries below are retained as development-history notes for the work t
 - The cramped yt-dlp status field now reports both split backends compactly. When both are same-year date releases it displays, for example, `08.19 / A:07.04` (primary / authenticated). The live PowerShell window continues to print the complete executable paths and full versions.
 - The 0.2.66 stable-primary / pinned-2026.07.04 authenticated backend policy is otherwise unchanged.
 
-### 0.2.66experimental — PRIMARY STABLE RESTORE / SPLIT BACKENDS
+### 0.2.66experimental - PRIMARY STABLE RESTORE / SPLIT BACKENDS
 
 0.2.65 proved that the public/anonymous and authenticated YouTube paths currently need different yt-dlp behavior. This follow-up removes the now-unnecessary global blacklist on stable **2026.08.19** for the public side. The 2026.08.19 problem we reproduced was the authenticated/age-gated **360p-only** regression; the same release also contains the post-`android_vr` fix needed by ordinary public videos.
 
 The split is therefore now deliberately **stable + stable**, with no nightly required:
 
-- `Tools\yt-dlp\yt-dlp.exe` — current official stable **2026.08.19 or newer**, used for normal anonymous/public downloads and the ordinary recovery pipeline.
-- `Tools\yt-dlp\yt-dlp-auth.exe` — pinned **2026.07.04**, used only for authenticated YouTube.
+- `Tools\yt-dlp\yt-dlp.exe` - current official stable **2026.08.19 or newer**, used for normal anonymous/public downloads and the ordinary recovery pipeline.
+- `Tools\yt-dlp\yt-dlp-auth.exe` - pinned **2026.07.04**, used only for authenticated YouTube.
 
 `build-native.bat` and the GUI **Update** action now use yt-dlp's normal stable release channel for the primary slot and accept 2026.08.19. A copied nightly in the primary slot is replaced with the current stable build so the portable package is predictable. The authenticated helper remains pinned to 2026.07.04.
 
 This keeps the ordinary-video `android_vr` fix while isolating the 2026.08.19/newer authenticated-quality problem to a path where those builds are not used.
 
-### 0.2.65experimental — SPLIT YOUTUBE BACKENDS / AUTH NIGHTLY BLACKLIST
+### 0.2.65experimental - SPLIT YOUTUBE BACKENDS / AUTH NIGHTLY BLACKLIST
 
 Testing exposed a genuine backend conflict rather than one universally good yt-dlp release. The current nightly fixes the ordinary/public YouTube mid-download 403 caused by the retired `android_vr` client, but the same nightly reproduces the authenticated/age-gated **360p-only** regression. Conversely, **2026.07.04** still gives the desired authenticated quality on the known age-gated test but is too old to be trusted as the general public-video backend.
 
 0.2.65 therefore deliberately keeps **two yt-dlp executables**:
 
-- `Tools\yt-dlp\yt-dlp.exe` — current acceptable official nightly; used for normal anonymous/public downloads and the ordinary recovery pipeline.
-- `Tools\yt-dlp\yt-dlp-auth.exe` — pinned **2026.07.04**; used only when a YouTube task actually enters WinterStatic's authenticated Edge-cookie path.
+- `Tools\yt-dlp\yt-dlp.exe` - current acceptable official nightly; used for normal anonymous/public downloads and the ordinary recovery pipeline.
+- `Tools\yt-dlp\yt-dlp-auth.exe` - pinned **2026.07.04**; used only when a YouTube task actually enters WinterStatic's authenticated Edge-cookie path.
 
 In **Automatic** mode, the public/anonymous first attempt still uses the current nightly. If YouTube explicitly requires authentication, WinterStatic switches the entire authenticated YouTube attempt (including its preflight and recovery calls) to the pinned 2026.07.04 backend, then restores the primary backend afterward. **Use account browser** does the same immediately for YouTube. Authenticated non-YouTube sites continue using the normal primary backend.
 
@@ -105,7 +105,7 @@ The GUI Update action now refreshes the primary nightly **and re-pins the authen
 
 This is intentionally an experimental compatibility split, not a claim that 2026.07.04 is globally preferable. The split should be removed once a newer yt-dlp build is verified to handle both ordinary YouTube and the known authenticated/age-gated quality case correctly.
 
-### 0.2.64experimental — YOUTUBE BACKEND REFRESH / ANDROID_VR RETIREMENT
+### 0.2.64experimental - YOUTUBE BACKEND REFRESH / ANDROID_VR RETIREMENT
 
 This experiment keeps the **0.2.63 Automatic-authentication-on-demand** behavior intact and changes the bundled yt-dlp policy instead. YouTube retired the `android_vr` media path in August 2026; yt-dlp 2026.07.04 can still select that client and may begin downloading normally before the media host starts returning HTTP 403. WinterStatic therefore no longer falls back to 2026.07.04.
 
@@ -115,7 +115,7 @@ The existing 2026.08.19 authenticated/age-restricted 360p concern is still treat
 
 Primary regression target for this build: `https://www.youtube.com/watch?v=D9290H1-ZRM`, which reproducibly reached roughly 2% with yt-dlp 2026.07.04 before failing with HTTP 403.
 
-### 0.2.63experimental — AUTOMATIC AUTHENTICATION ON DEMAND
+### 0.2.63experimental - AUTOMATIC AUTHENTICATION ON DEMAND
 
 This experiment changes only the **Automatic** authentication policy. Automatic mode now tries the normal anonymous yt-dlp path first, even when a saved dedicated Edge login is available. If that first YouTube attempt fails and yt-dlp emits strong authentication-required wording (for example an explicit sign-in/cookies/private/members-only requirement), WinterStatic retries through the existing authenticated Edge path. Ordinary network, format, 403/429, 404, unsupported-URL, and transport failures do **not** by themselves cause account cookies to be added.
 
@@ -125,19 +125,19 @@ Automatic mode also no longer refuses to start a public anonymous-first download
 
 The purpose is to test whether keeping account cookies away from ordinary public YouTube downloads restores the reliability seen in older builds while preserving automatic access to genuinely gated videos.
 
-### 0.2.62experimental — POST-SUCCESS BUG SWEEP
+### 0.2.62experimental - POST-SUCCESS BUG SWEEP
 
 After 0.2.61 successfully proved Edge runtime discovery works with scalar CDP target handling, this pass tightens nearby failure paths without changing the successful normal path. Runtime target selection now keeps a current HTTP(S) fallback for cross-host redirects, only falls back after a short grace period (or when there is only one usable page target), verifies that `Network.enable` was actually sent, and redacts any URL-like text from attachment exceptions. Recovery signals are reset at the start of each yt-dlp attempt so a 404/progress/format signal from an earlier retry cannot incorrectly steer a later retry. Hidden helper captures now enforce their timeout instead of falling through into a blocking pipe read if a helper process wedges.
 
 The build documentation also now reports the current portable output-folder version correctly.
 
-### 0.2.61experimental — CDP TARGET NORMALIZATION / EDGE RETEST
+### 0.2.61experimental - CDP TARGET NORMALIZATION / EDGE RETEST
 
 The Chrome diagnostic exposed a concrete PowerShell-side type bug before the WebSocket handshake: the selected `webSocketDebuggerUrl` reached `ClientWebSocket.ConnectAsync()` as `System.Object[]` instead of one URI. That means the failure happened in our target/URI handling before Chrome or Edge had a chance to accept or reject the WebSocket connection.
 
 This build explicitly flattens the CDP target list, selects one scalar page target, converts one scalar WebSocket URL into a `System.Uri`, and then attaches. Runtime discovery is Edge-first again, with the 60-second retry window and safe first-exception diagnostic retained. No media URLs are printed.
 
-### 0.2.60experimental — CHROME CDP COMPARISON TEST
+### 0.2.60experimental - CHROME CDP COMPARISON TEST
 
 This experiment keeps the 60-second runtime-observer startup/attachment window but deliberately uses **Google Chrome only** for difficult-download runtime network discovery. It does not fall back to Edge or Brave during this test, so the result cleanly compares another Chromium browser with Edge.
 
@@ -145,7 +145,7 @@ The normal account/login browser remains Edge; only the isolated temporary runti
 
 The first safe WebSocket attachment exception is now printed and logged. Media URLs and detected candidate URLs remain hidden. If Chrome attaches successfully while Edge repeatedly returned `ATTACH_FAILED`, that points to an Edge-specific CDP/WebSocket/policy difference rather than a general timing problem.
 
-### 0.2.59experimental — ONE-MINUTE EDGE OBSERVER STARTUP WINDOW
+### 0.2.59experimental - ONE-MINUTE EDGE OBSERVER STARTUP WINDOW
 
 - Built directly on **0.2.58experimental** after Edge still failed while its detector page was visibly loading.
 - Extends only the Edge runtime-observer startup/attachment window from **20 seconds to 60 seconds**.
@@ -153,14 +153,14 @@ The first safe WebSocket attachment exception is now printed and logged. Media U
 - The normal **30-second media-capture window still begins only after attachment succeeds**, so the extra minute is not taken away from actual network listening time.
 - If Edge still cannot attach after the full minute, the attempt count remains in the failure message; that would strongly suggest the problem is attachment compatibility rather than simple browser startup speed.
 
-### 0.2.58experimental — EDGE OBSERVER STARTUP/ATTACH RETRY
+### 0.2.58experimental - EDGE OBSERVER STARTUP/ATTACH RETRY
 
 - Keeps Edge first for difficult runtime-network discovery.
 - Fixes a startup race seen in 0.2.57experimental: the detector previously stopped waiting as soon as an Edge page target appeared, then made only one WebSocket/`Network.enable` attach attempt.
 - The detector now waits up to 20 seconds for the requested page target and retries the read-only CDP attachment instead of failing on the first early target.
 - The normal 30-second media-capture window starts only after the observer has attached successfully.
 
-### 0.2.57experimental — EDGE-FIRST RUNTIME NETWORK DISCOVERY
+### 0.2.57experimental - EDGE-FIRST RUNTIME NETWORK DISCOVERY
 
 - Built on **0.2.56experimental**; the yt-dlp 2026.08.19 blacklist, portable Tools bootstrap, and conditional authenticated-YouTube mweb fallback are unchanged.
 - Difficult-download runtime network discovery now tries **Microsoft Edge first**, then Chrome, then Brave.
@@ -168,7 +168,7 @@ The first safe WebSocket attachment exception is now printed and logged. Media U
 - This deliberately gives Edge's read-only CDP/network-observer path another clean test without changing static discovery, candidate scoring, preview rejection, 404 recovery, or the normal authenticated Edge cookie path.
 - If Edge is installed but its observer endpoint/attachment fails, this experiment reports that failure; it does not silently switch browsers mid-attempt. That makes the Edge test unambiguous.
 
-### 0.2.56experimental — YT-DLP STABLE BLACKLIST + PORTABLE UPDATE SAFETY
+### 0.2.56experimental - YT-DLP STABLE BLACKLIST + PORTABLE UPDATE SAFETY
 
 > Historical note: the 2026.08.19 blacklist itself remains relevant, but the old fallback to 2026.07.04 was superseded by 0.2.64 after YouTube retired the `android_vr` path used by that older backend.
 
@@ -180,7 +180,7 @@ The first safe WebSocket attachment exception is now printed and logged. Media U
 - The GUI **Update** button no longer delegates to `yt-dlp -U` (which can preserve a nightly update channel). It now installs the newest official stable release except 2026.08.19 and uses the same validated fallback behavior.
 - Portable Tools remain first in runtime lookup; external/configured/PATH copies are only relevant when the portable executable is absent.
 
-### 0.2.55experimental — AUTHENTICATED YOUTUBE MWEB QUALITY FALLBACK
+### 0.2.55experimental - AUTHENTICATED YOUTUBE MWEB QUALITY FALLBACK
 
 - Built on **0.2.54experimental**, keeping the portable runtime bootstrap and Tools-first/fallback-second lookup.
 - Keeps the normal authenticated Edge command unchanged as the first choice: `--cookies-from-browser edge:<Tools\BrowserProfile\Default>`.
@@ -192,7 +192,7 @@ The first safe WebSocket attachment exception is now printed and logged. Media U
 - Audio-only mode and non-YouTube downloads do not run the mweb quality fallback.
 - PowerShell reports only the safe selected heights and whether the fallback was used; it does not print cookies or signed media URLs.
 
-### 0.2.54experimental — PORTABLE RUNTIME BOOTSTRAP + TOOLS-FIRST LOOKUP
+### 0.2.54experimental - PORTABLE RUNTIME BOOTSTRAP + TOOLS-FIRST LOOKUP
 
 - Built directly from the working **0.2.50experimental** branch; the 0.2.51/0.2.52 browser detours and the 0.2.53 hard-pin wording are not carried forward.
 - `build-native.bat` produces a self-contained runtime package: if the copied local Tools tree does not already contain them, it downloads an acceptable **official yt-dlp Windows executable** (nightly when the current stable is the excluded 2026.08.19 build) and the **Gyan FFmpeg release essentials ZIP**, placing them under `Tools\yt-dlp` and `Tools\FFmpeg\bin`.
@@ -201,7 +201,7 @@ The first safe WebSocket attachment exception is now printed and logged. Media U
 - The live PowerShell window prints the exact yt-dlp executable, yt-dlp version, and FFmpeg executable selected for each task.
 - Keeps the 0.2.50 Edge authentication path, quality selectors, Brave-first runtime observer, 404 recovery, preview/image filtering, and recovery single-output guard.
 
-### 0.2.49experimental — FORCED TV_DOWNGRADED TEST (NOT RETAINED)
+### 0.2.49experimental - FORCED TV_DOWNGRADED TEST (NOT RETAINED)
 
 - Tested forcing `youtube:player_client=tv_downgraded` with the dedicated Edge cookies; this was not retained after the current target returned `The page needs to be reloaded`.
 - Kept the dedicated WinterStatic Edge account profile while testing that forced client route.
@@ -215,7 +215,7 @@ The first safe WebSocket attachment exception is now printed and logged. Media U
 - Runtime network discovery uses a separate temporary detector profile and now prefers Brave, then Chrome, then Edge. The persistent Edge account profile remains reserved for cookie extraction and cannot be locked by the detector.
 - Keeps the 0.2.45 pre-download HTTP 404 recovery and all static/captured-page/preview filtering experiments.
 
-### 0.2.48experimental — RECOVERY OUTPUT + RUNTIME BROWSER CLEANUP
+### 0.2.48experimental - RECOVERY OUTPUT + RUNTIME BROWSER CLEANUP
 
 - Keeps the dedicated Microsoft Edge account profile introduced in 0.2.46/0.2.47.
 - Runtime network discovery now prefers Brave, then Chrome, then Edge because Brave was the proven observer path during testing.
@@ -271,9 +271,9 @@ require Python, Tkinter, Qt, .NET, or a non-system GUI runtime.
   process tree.
 - Dynamic GUI pass display that reports the work yt-dlp is actually doing without
   guessing a fixed total number of passes, for example:
-  - Pass 1 — Downloading video
-  - Pass 2 — Downloading audio
-  - Pass 3 — Assembling
+  - Pass 1 - Downloading video
+  - Pass 2 - Downloading audio
+  - Pass 3 - Assembling
 - GUI log and persistent `settings.ini`.
 - Embedded multi-size application icon and Windows version metadata.
 
@@ -442,11 +442,11 @@ Typical setup:
 
 Authentication modes:
 
-- **Automatic** — starts with the primary anonymous/public backend. If YouTube
+- **Automatic** - starts with the primary anonymous/public backend. If YouTube
   explicitly requires authentication and a saved Edge session is available, the
   task switches to the separate stable-only `yt-dlp-auth.exe` backend plus Edge cookies.
-- **Anonymous** — never supplies account-browser cookies and stays on the primary backend.
-- **Use account browser** — always asks yt-dlp to load cookies from the dedicated
+- **Anonymous** - never supplies account-browser cookies and stays on the primary backend.
+- **Use account browser** - always asks yt-dlp to load cookies from the dedicated
   Edge profile; on YouTube this also selects the separate authenticated backend.
 
 The dedicated WinterStatic Edge profile must be closed before yt-dlp reads its
@@ -594,9 +594,9 @@ cleanup of a live download.
 The GUI does not assume that every site or quality mode has the same number of
 passes. Each distinct media stream reported by yt-dlp starts the next pass and is
 labelled according to the codecs yt-dlp reports. A common separate-stream download
-therefore appears as **Pass 1 — Downloading video**, **Pass 2 — Downloading audio**,
-then **Pass 3 — Assembling** when FFmpeg merges them. A site that supplies one
-combined video/audio file may only show **Pass 1 — Downloading**, while audio-only
+therefore appears as **Pass 1 - Downloading video**, **Pass 2 - Downloading audio**,
+then **Pass 3 - Assembling** when FFmpeg merges them. A site that supplies one
+combined video/audio file may only show **Pass 1 - Downloading**, while audio-only
 or other workflows can use fewer or different passes. The pass number is deliberately
 shown without an "of N" total because the required work is not always known in
 advance. The visible PowerShell window remains the authoritative detailed yt-dlp
@@ -666,7 +666,7 @@ FFmpeg licensing in particular depends on the configuration of the exact build.
 
 ## VERSION HISTORY
 
-### 0.2.42experimental — CANDIDATE RANKING
+### 0.2.42experimental - CANDIDATE RANKING
 
 - Experimental unsupported-page recovery now collects and ranks multiple media/player candidates instead of immediately accepting the first valid-looking video URL.
 - Embedded/structured player URLs and HLS/DASH manifests are preferred over generic direct-file references.
@@ -675,7 +675,7 @@ FFmpeg licensing in particular depends on the configuration of the exact build.
 - Candidate validation remains bounded to at most ten direct-resource probes per scanned page and still rejects image and HTML false positives.
 - No site-specific rules, browser automation, or runtime network interception were added.
 
-### 0.2.40experimental — GENERIC MEDIA DISCOVERY IMPROVEMENTS
+### 0.2.40experimental - GENERIC MEDIA DISCOVERY IMPROVEMENTS
 
 - Built directly from the 0.1.31 stable baseline, carrying forward only the generic discovery changes that proved useful during experimental testing.
 - Expanded unsupported-page HTML5 discovery to recognise lazy `data-src`, `data-video-src`, and lazy iframe sources.
@@ -687,7 +687,7 @@ FFmpeg licensing in particular depends on the configuration of the exact build.
 - Added generic embedded-player bootstrap/reference detection for common `/embed/` and `/players/` style URLs found in static page markup.
 - No site-specific adapters, route rewriting, WebDriver/GeckoDriver/Selenium, remote debugging, automatic browser control, AMP-specific handling, or unproven structured-player metadata experiments are included.
 
-### 0.1.31 — RELIABILITY AND FORMAT COMPATIBILITY
+### 0.1.31 - RELIABILITY AND FORMAT COMPATIBILITY
 
 - Added a short LibreWolf shutdown grace period so normal background profile/cookie flushing after the final browser window closes is not mistaken for an open browser. Visible and background-only LibreWolf states are reported separately, and WinterStatic never kills LibreWolf automatically.
 - Updated the Maximum 1080p / Maximum 720p selectors to accept formats with unknown height metadata, preserving capped-format preference while allowing usable streams from sites such as Facebook.
@@ -696,7 +696,7 @@ FFmpeg licensing in particular depends on the configuration of the exact build.
 - Fixed portable-build settings generation so `ClosePowerShellOnSuccess=0` is explicitly written to the generated `settings.ini`.
 - Retained the 0.1.30 conservative Unsupported URL static discovery, 0.1.29 network resilience, stable PowerShell placement, Nuke, dynamic pass reporting, and existing GUI layout without adding automatic browser-based media discovery.
 
-### 0.1.30 — UNSUPPORTED URL RECOVERY
+### 0.1.30 - UNSUPPORTED URL RECOVERY
 
 - Added an automatic recovery path specifically for yt-dlp `Unsupported URL`
   failures; normal supported URLs still use the normal extractor path first.
@@ -717,7 +717,7 @@ FFmpeg licensing in particular depends on the configuration of the exact build.
 - No GUI layout, terminal placement, dynamic pass reporting, format selection,
   Nuke, or Close PowerShell behaviour was intentionally changed.
 
-### 0.1.29 — DOWNLOAD RESILIENCE
+### 0.1.29 - DOWNLOAD RESILIENCE
 
 - Added a conservative automatic recovery layer around the normal yt-dlp workflow.
 - Raised retry limits modestly to 12 normal, 15 fragment, and 5 extractor /
@@ -740,7 +740,7 @@ FFmpeg licensing in particular depends on the configuration of the exact build.
 - No GUI layout, terminal placement, Nuke, dynamic pass reporting, format
   selection, or Close PowerShell behaviour was intentionally changed.
 
-### 0.1.28 — CLOSE-ON-SUCCESS FIX
+### 0.1.28 - CLOSE-ON-SUCCESS FIX
 
 - Fixed **Close PowerShell on success** when PowerShell is launched with `-NoExit`.
 - The previous script used a normal PowerShell `exit`, which could return to the
@@ -751,7 +751,7 @@ FFmpeg licensing in particular depends on the configuration of the exact build.
 - No changes to download formats, authentication, Nuke, dynamic pass reporting,
   terminal placement, or GUI layout.
 
-### 0.1.27 — CLOSE POWERSHELL ON SUCCESS
+### 0.1.27 - CLOSE POWERSHELL ON SUCCESS
 
 - Added an optional **Close PowerShell on success** checkbox in the Run panel.
 - The preference is disabled by default and persisted in `settings.ini`.
@@ -763,7 +763,7 @@ FFmpeg licensing in particular depends on the configuration of the exact build.
   still report successful completion reliably.
 - No changes to yt-dlp format selection, authentication, Nuke, or terminal placement.
 
-### 0.1.26 — DYNAMIC PASS REPORTING
+### 0.1.26 - DYNAMIC PASS REPORTING
 
 - Replaced the fixed **Pass 1 of 2 / Pass 2 of 2** presentation with dynamic pass
   numbering that does not claim a total number of passes in advance.
@@ -782,7 +782,7 @@ FFmpeg licensing in particular depends on the configuration of the exact build.
 - No format-selection, authentication, Nuke, terminal-placement, logging, or GUI
   layout behaviour was intentionally changed.
 
-### 0.1.25 — TWO-PASS PROGRESS RESTORATION
+### 0.1.25 - TWO-PASS PROGRESS RESTORATION
 
 - Restored the original two-sweep progress model from the Python frontend instead
   of treating each selected yt-dlp stream as a separate GUI progress sweep.
@@ -800,7 +800,7 @@ FFmpeg licensing in particular depends on the configuration of the exact build.
 - No format-selection, authentication, Nuke, terminal-placement, or GUI layout
   behaviour was intentionally changed.
 
-### 0.1.24 — PASS-STATE FIX
+### 0.1.24 - PASS-STATE FIX
 
 - Fixed a GUI progress-state race where a late yt-dlp progress line could change
   the stage label back to **Pass 1 of 2** after merge / audio post-processing had
@@ -810,7 +810,7 @@ FFmpeg licensing in particular depends on the configuration of the exact build.
 - No download, format-selection, authentication, Nuke, or terminal-placement
   behaviour was intentionally changed.
 
-### 0.1.23 — WINDOWS TERMINAL PLACEMENT SAFETY
+### 0.1.23 - WINDOWS TERMINAL PLACEMENT SAFETY
 
 - Reworked automatic PowerShell / Windows Terminal placement to avoid moving a
   newly created Terminal host while its non-client/title-bar layout is still
@@ -827,7 +827,7 @@ FFmpeg licensing in particular depends on the configuration of the exact build.
 - No download, logging, authentication, Nuke, format-selection, or GUI layout
   behaviour is intentionally changed from 0.1.22.
 
-### 0.1.22 — POWERSHELL LOGGING RELIABILITY
+### 0.1.22 - POWERSHELL LOGGING RELIABILITY
 
 - Replaced repeated PowerShell `Add-Content` calls with one explicitly shared
   `FileStream` / `StreamWriter` for the per-task progress log.
@@ -841,7 +841,7 @@ FFmpeg licensing in particular depends on the configuration of the exact build.
 - Download, authentication, format-selection, PowerShell placement, Nuke, and GUI
   layout behaviour are otherwise unchanged from 0.1.21.
 
-### 0.1.21 — RELEASE HOUSEKEEPING
+### 0.1.21 - RELEASE HOUSEKEEPING
 
 - Added conservative cleanup for finished `%TEMP%\WinterStaticDL_*` task folders
   older than 24 hours.
@@ -857,7 +857,7 @@ FFmpeg licensing in particular depends on the configuration of the exact build.
 - No download, authentication, format-selection, PowerShell placement, Nuke, or
   GUI workflow behaviour is intentionally changed from 0.1.20.
 
-### 0.1.20 — GITHUB / DISTRIBUTION PREP
+### 0.1.20 - GITHUB / DISTRIBUTION PREP
 
 - Rebuilt the README as public project documentation and added the official
   repository URL.
@@ -874,7 +874,7 @@ FFmpeg licensing in particular depends on the configuration of the exact build.
 - No downloader, authentication, format-selection, PowerShell, Nuke, or GUI
   workflow behaviour is intentionally changed from 0.1.19.
 
-### 0.1 — INITIAL NATIVE DEVELOPMENT
+### 0.1 - INITIAL NATIVE DEVELOPMENT
 
 The 0.1.x line was the private development cycle that established the native
 frontend. Its changes are intentionally consolidated here.
@@ -923,7 +923,7 @@ frontend. Its changes are intentionally consolidated here.
 
 ## Changelog
 
-### 0.2.42experimental — PREVIEW REFUSAL + DIAGNOSTICS
+### 0.2.42experimental - PREVIEW REFUSAL + DIAGNOSTICS
 
 - Marks autoplay/muted/loop-style HTML5 video elements as likely previews.
 - Refuses to select preview-like candidates when no normal candidate exists; a clean failure is preferred to downloading the wrong hover clip.
