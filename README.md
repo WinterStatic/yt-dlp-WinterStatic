@@ -642,7 +642,7 @@ Project:
 https://github.com/WinterStatic/yt-dlp-WinterStatic
 ```
 
-Created by WinterStatic. Developed with ChatGPT (OpenAI).
+Created by WinterStatic. Developed with ChatGPT (OpenAI). Additional code review by Claude (Anthropic).
 
 This project is a frontend for yt-dlp. It is not the yt-dlp project itself and
 is not presented as an official yt-dlp build.
