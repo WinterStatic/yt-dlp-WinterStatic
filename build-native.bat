@@ -6,11 +6,11 @@ set "RELEASE_MODE=0"
 if /I "%~1"=="release" set "RELEASE_MODE=1"
 if not "%~1"=="" if "%RELEASE_MODE%"=="0" goto :usage
 
-title WinterStatic yt-dlp Downloader - Native Build 0.1.37
+title WinterStatic yt-dlp Downloader - Native Build 0.1.38
 
 echo.
 echo ==========================================================
-echo   WinterStatic yt-dlp Downloader - Native Win32 0.1.37
+echo   WinterStatic yt-dlp Downloader - Native Win32 0.1.38
 echo ==========================================================
 echo.
 echo Builds the native Win32 frontend with MSVC and prepares the portable folder.
@@ -60,7 +60,7 @@ cl /nologo /std:c++17 /O2 /EHsc /MT /utf-8 /DUNICODE /D_UNICODE /Fo"%BUILD_OBJ%"
 if errorlevel 1 goto :build_failed
 if not exist "%BUILD_EXE%" goto :build_failed
 
-set "BASE_DIST=%CD%\WinterStatic-yt-dlp-Downloader-0.1.37-portable"
+set "BASE_DIST=%CD%\WinterStatic-yt-dlp-Downloader-0.1.38-portable"
 set "DIST=%BASE_DIST%"
 if not exist "%DIST%" goto :dist_ready
 rmdir /s /q "%DIST%" >nul 2>nul
@@ -151,7 +151,7 @@ if errorlevel 1 goto :ffmpeg_download_failed
 
 > "%DIST%\BUILD-INFO.txt" (
   echo WinterStatic yt-dlp Downloader
-  echo Version 0.1.37
+  echo Version 0.1.38
   echo.
   echo Created by WinterStatic
   echo Native Win32 frontend
@@ -206,11 +206,11 @@ exit /b 0
 :make_release_assets
 echo.
 echo [release] Creating GitHub release ZIPs...
-set "RELEASE_PORTABLE_ZIP=%CD%\WinterStatic-yt-dlp-Downloader-0.1.37-portable.zip"
-set "RELEASE_SOURCE_ZIP=%CD%\WinterStatic-yt-dlp-Downloader-0.1.37-source.zip"
+set "RELEASE_PORTABLE_ZIP=%CD%\WinterStatic-yt-dlp-Downloader-0.1.38-portable.zip"
+set "RELEASE_SOURCE_ZIP=%CD%\WinterStatic-yt-dlp-Downloader-0.1.38-source.zip"
 set "RELEASE_STAGE=%BUILD_WORK%\release-assets"
-set "RELEASE_PORTABLE_DIR=%RELEASE_STAGE%\WinterStatic-yt-dlp-Downloader-0.1.37-portable"
-set "RELEASE_SOURCE_DIR=%RELEASE_STAGE%\WinterStatic-yt-dlp-Downloader-0.1.37-source"
+set "RELEASE_PORTABLE_DIR=%RELEASE_STAGE%\WinterStatic-yt-dlp-Downloader-0.1.38-portable"
+set "RELEASE_SOURCE_DIR=%RELEASE_STAGE%\WinterStatic-yt-dlp-Downloader-0.1.38-source"
 
 if exist "%RELEASE_STAGE%" rmdir /s /q "%RELEASE_STAGE%" >nul 2>nul
 mkdir "%RELEASE_PORTABLE_DIR%" >nul 2>nul

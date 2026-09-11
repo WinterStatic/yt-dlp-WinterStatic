@@ -1,5 +1,6 @@
-#define NOMINMAX
+﻿#define NOMINMAX
 #include <windows.h>
+#include <windowsx.h>
 #include <commctrl.h>
 #include <commdlg.h>
 #include <dwmapi.h>
@@ -14,17 +15,20 @@
 #include <cctype>
 #include <cstring>
 #include <cstdlib>
+#include <cstdint>
 #include <cwctype>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iterator>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <tlhelp32.h>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #pragma comment(lib, "Comctl32.lib")
@@ -44,7 +48,7 @@ namespace fs = std::filesystem;
 // -----------------------------------------------------------------------------
 
 constexpr wchar_t APP_NAME[] = L"WinterStatic yt-dlp Downloader";
-constexpr wchar_t APP_VERSION[] = L"0.1.37";
+constexpr wchar_t APP_VERSION[] = L"0.1.38";
 constexpr wchar_t MAIN_CLASS[] = L"WinterStaticYtDlpDownloaderWindow";
 constexpr wchar_t SETTINGS_FILE[] = L"settings.ini";
 
@@ -77,6 +81,7 @@ constexpr UINT WM_APP_TOOL_STATUS    = WM_APP + 2;
 constexpr UINT WM_APP_ACCOUNT_STATUS = WM_APP + 3;
 constexpr UINT WM_APP_PROGRESS       = WM_APP + 4;
 constexpr UINT WM_APP_TASK_DONE      = WM_APP + 5;
+constexpr UINT WM_APP_JOB_LOG        = WM_APP + 6;
 
 // Control IDs
 constexpr int IDC_URL = 1001;
@@ -118,6 +123,7 @@ constexpr int IDC_DETAIL = 1308;
 constexpr int IDC_CLOSE_POWERSHELL = 1309;
 constexpr int IDC_BROWSER_SWEEP = 1310;
 constexpr int IDC_LOG = 1401;
+constexpr int IDC_TABS = 1501;
 
 struct RectI { int x{}, y{}, w{}, h{}; };
 struct PanelRects {
@@ -143,10 +149,55 @@ struct AccountStatus {
     bool valid{false};
 };
 
+struct DownloadJob {
+    int id{0};
+    std::wstring url;
+    std::wstring output;
+    std::wstring quality{L"Maximum 1080p"};
+    std::wstring auth{L"Automatic"};
+    bool closePowerShellOnSuccess{false};
+    bool browserSweep{false};
+
+    int progressPercent{0};
+    std::wstring stage{L"Ready"};
+    std::wstring detail;
+    std::wstring logText;
+    bool running{false};
+    bool finished{false};
+    int exitCode{0};
+
+    std::atomic<unsigned long long> generation{0};
+
+    std::mutex progressMutex;
+    int progressPassNumber{0};
+    std::string currentDownloadKey;
+    bool postProcessPassActive{false};
+
+    std::mutex consoleMutex;
+    DWORD consolePid{0};
+    HWND consoleHwnd{nullptr};
+    std::wstring consoleTitle;
+    std::wstring logPath;
+    std::wstring donePath;
+    std::wstring taskDir;
+};
+
 struct ProgressUpdate {
+    int jobId{0};
     int percent{0};
     std::wstring stage;
     std::wstring detail;
+};
+
+struct JobLogUpdate {
+    int jobId{0};
+    std::wstring text;
+};
+
+struct TaskDoneUpdate {
+    int jobId{0};
+    int code{1};
+    unsigned long long generation{0};
 };
 
 HWND g_main = nullptr;
@@ -171,25 +222,23 @@ std::wstring g_accountBrowserUserData;
 std::wstring g_accountBrowserProfile;
 
 std::atomic<bool> g_accountSessionValid{false};
-std::atomic<bool> g_busy{false};
-std::mutex g_progressStateMutex;
-int g_progressPassNumber = 0;
-std::string g_currentDownloadKey;
-bool g_postProcessPassActive = false;
-double g_lastDisplayedPercent = 0.0;
-unsigned long long g_lastDownloadedBytes = 0;
 int g_progressPercent = 0;
 bool g_startupLoginPending = true;
-std::atomic<unsigned long long> g_taskGeneration{0};
-std::mutex g_consoleMutex;
-std::vector<std::pair<DWORD, std::wstring>> g_managedConsoles;
-DWORD g_currentConsolePid = 0;
-HWND g_currentConsoleHwnd = nullptr;
-std::wstring g_currentConsoleTitle;
-std::wstring g_currentLogPath;
-std::wstring g_currentDonePath;
+
+HWND g_tabs = nullptr;
+std::vector<std::shared_ptr<DownloadJob>> g_jobs;
+int g_activeJobIndex = -1;
+int g_nextJobId = 1;
+int g_hoverCloseTab = -1;
+int g_pressedCloseTab = -1;
 
 void SetProgressPercent(int percent);
+std::shared_ptr<DownloadJob> ActiveJob();
+std::shared_ptr<DownloadJob> FindJobById(int jobId);
+void SaveActiveJobUi();
+void LoadActiveJobUi();
+void UpdateTabLabel(const std::shared_ptr<DownloadJob>& job);
+void RefreshActiveJobControls();
 
 // -----------------------------------------------------------------------------
 // Utility
@@ -311,20 +360,63 @@ std::wstring TimeStamp() {
     return buf;
 }
 
-void AppendLogUi(const std::wstring& text) {
+std::shared_ptr<DownloadJob> ActiveJob() {
+    if (g_activeJobIndex < 0 || g_activeJobIndex >= static_cast<int>(g_jobs.size())) return {};
+    return g_jobs[static_cast<size_t>(g_activeJobIndex)];
+}
+
+std::shared_ptr<DownloadJob> FindJobById(int jobId) {
+    for (const auto& job : g_jobs) {
+        if (job && job->id == jobId) return job;
+    }
+    return {};
+}
+
+void TrimJobLog(std::wstring& text) {
+    constexpr size_t kMaxChars = 1024 * 1024;
+    constexpr size_t kTrimChars = 128 * 1024;
+    if (text.size() > kMaxChars) text.erase(0, std::min(kTrimChars, text.size()));
+}
+
+void AppendLineToVisibleLog(const std::wstring& line) {
     HWND edit = GetDlgItem(g_main, IDC_LOG);
     if (!edit) return;
-    std::wstring line = L"[" + TimeStamp() + L"] " + text + L"\r\n";
     const int len = GetWindowTextLengthW(edit);
     SendMessageW(edit, EM_SETSEL, len, len);
     SendMessageW(edit, EM_REPLACESEL, FALSE, reinterpret_cast<LPARAM>(line.c_str()));
     SendMessageW(edit, EM_SCROLLCARET, 0, 0);
 }
 
+void AppendLogUi(const std::wstring& text) {
+    const std::wstring line = L"[" + TimeStamp() + L"] " + text + L"\r\n";
+    auto job = ActiveJob();
+    if (job) {
+        job->logText += line;
+        TrimJobLog(job->logText);
+    }
+    AppendLineToVisibleLog(line);
+}
+
+void AppendJobLogUi(int jobId, const std::wstring& text) {
+    auto job = FindJobById(jobId);
+    if (!job) return;
+    const std::wstring line = L"[" + TimeStamp() + L"] " + text + L"\r\n";
+    job->logText += line;
+    TrimJobLog(job->logText);
+    auto active = ActiveJob();
+    if (active && active->id == jobId) AppendLineToVisibleLog(line);
+}
+
 void PostLog(const std::wstring& text) {
     if (!g_main) return;
     auto* copy = new std::wstring(text);
     if (!PostMessageW(g_main, WM_APP_LOG, 0, reinterpret_cast<LPARAM>(copy))) delete copy;
+}
+
+void PostJobLog(const std::shared_ptr<DownloadJob>& job, const std::wstring& text) {
+    if (!g_main || !job) return;
+    auto* update = new JobLogUpdate{job->id, text};
+    if (!PostMessageW(g_main, WM_APP_JOB_LOG, 0, reinterpret_cast<LPARAM>(update))) delete update;
 }
 
 std::wstring PsQuote(const std::wstring& s) {
@@ -370,6 +462,7 @@ void WriteIni(const wchar_t* section, const wchar_t* key, const std::wstring& va
 }
 
 void SaveSettings() {
+    SaveActiveJobUi();
     WriteIni(L"General", L"OutputDir", GetText(IDC_OUTPUT));
     WriteIni(L"General", L"YtDlpPath", GetText(IDC_YTDLP));
     WriteIni(L"General", L"FfmpegPath", GetText(IDC_FFMPEG));
@@ -1162,7 +1255,7 @@ std::wstring DirectPowerShellCommand(bool validate) {
     }
     auto args = BuildBaseArgs(output, ffmpeg);
     const std::wstring mode = GetText(IDC_AUTH);
-    // In 0.2.63experimental, Automatic begins anonymously and only falls back to
+    // Automatic begins anonymously and only falls back to
     // the saved Edge session from the managed PowerShell task when yt-dlp emits a
     // strong authentication-required signal. A copied one-line command represents
     // that first anonymous attempt; explicit account mode still includes cookies.
@@ -1177,10 +1270,10 @@ std::wstring DirectPowerShellCommand(bool validate) {
     return cmd;
 }
 
-std::wstring UniqueConsoleTitle() {
+std::wstring UniqueConsoleTitle(int jobId) {
     const ULONGLONG now = GetTickCount64() % 1000000ULL;
-    wchar_t b[128]{};
-    swprintf_s(b, L"WinterStatic Downloader - LIVE PowerShell #%06llu", now);
+    wchar_t b[160]{};
+    swprintf_s(b, L"WinterStatic Downloader - Download %d - LIVE PowerShell #%06llu", jobId, now);
     return b;
 }
 
@@ -1531,7 +1624,7 @@ std::wstring BuildDownloadScript(const std::wstring& ytdlp,
     s << L"    try { return (Join-Path $Base $Child) } catch { return '' }\r\n";
     s << L"}\r\n";
     s << L"function Get-WinterStaticRuntimeBrowser {\r\n";
-    s << L"    # 0.2.62experimental: Edge-first runtime discovery with scalar CDP target handling and safer fallback selection.\r\n";
+    s << L"    # Edge-first runtime discovery with scalar CDP target handling and safer fallback selection.\r\n";
     s << L"    $rows = @(\r\n";
     s << L"        [PSCustomObject]@{ Name = 'Edge'; Path = $AccountBrowserPath },\r\n";
     s << L"        [PSCustomObject]@{ Name = 'Edge'; Path = (Join-WinterStaticPathSafe ${env:ProgramFiles(x86)} 'Microsoft\\Edge\\Application\\msedge.exe') },\r\n";
@@ -2629,18 +2722,19 @@ HWND MoveConsoleRight(DWORD pid, const std::wstring& title, DWORD timeoutMs = 12
     return nullptr;
 }
 
-void PostProgress(int percent, const std::wstring& stage, const std::wstring& detail) {
-    auto* p = new ProgressUpdate{percent, stage, detail};
+void PostProgress(const std::shared_ptr<DownloadJob>& job, int percent,
+                  const std::wstring& stage, const std::wstring& detail) {
+    if (!g_main || !job) return;
+    auto* p = new ProgressUpdate{job->id, percent, stage, detail};
     if (!PostMessageW(g_main, WM_APP_PROGRESS, 0, reinterpret_cast<LPARAM>(p))) delete p;
 }
 
-void ResetDownloadProgressState() {
-    std::lock_guard<std::mutex> lock(g_progressStateMutex);
-    g_progressPassNumber = 0;
-    g_currentDownloadKey.clear();
-    g_postProcessPassActive = false;
-    g_lastDisplayedPercent = 0.0;
-    g_lastDownloadedBytes = 0;
+void ResetDownloadProgressState(const std::shared_ptr<DownloadJob>& job) {
+    if (!job) return;
+    std::lock_guard<std::mutex> lock(job->progressMutex);
+    job->progressPassNumber = 0;
+    job->currentDownloadKey.clear();
+    job->postProcessPassActive = false;
 }
 
 unsigned long long ParseUnsignedA(const std::string& text) {
@@ -2685,39 +2779,40 @@ bool CodecPresent(const std::string& codec) {
     return !value.empty() && value != "none" && value != "na" && value != "null";
 }
 
-int EnsureDownloadPass(const std::string& key) {
-    std::lock_guard<std::mutex> lock(g_progressStateMutex);
-    // Once post-processing starts, buffered download progress must not move the
-    // GUI backwards into another download pass.
-    if (g_postProcessPassActive) return 0;
-    if (g_progressPassNumber == 0 || key != g_currentDownloadKey) {
-        ++g_progressPassNumber;
-        g_currentDownloadKey = key;
-        g_lastDisplayedPercent = 0.0;
-        g_lastDownloadedBytes = 0;
+int EnsureDownloadPass(const std::shared_ptr<DownloadJob>& job, const std::string& key) {
+    if (!job) return 0;
+    std::lock_guard<std::mutex> lock(job->progressMutex);
+    // Once post-processing starts, buffered download progress must not move this
+    // job backwards into another download pass.
+    if (job->postProcessPassActive) return 0;
+    if (job->progressPassNumber == 0 || key != job->currentDownloadKey) {
+        ++job->progressPassNumber;
+        job->currentDownloadKey = key;
     }
-    return g_progressPassNumber;
+    return job->progressPassNumber;
 }
 
-int EnsurePostProcessPass() {
-    std::lock_guard<std::mutex> lock(g_progressStateMutex);
-    if (!g_postProcessPassActive) {
-        g_postProcessPassActive = true;
-        ++g_progressPassNumber;
+int EnsurePostProcessPass(const std::shared_ptr<DownloadJob>& job) {
+    if (!job) return 0;
+    std::lock_guard<std::mutex> lock(job->progressMutex);
+    if (!job->postProcessPassActive) {
+        job->postProcessPassActive = true;
+        ++job->progressPassNumber;
     }
-    return g_progressPassNumber;
+    return job->progressPassNumber;
 }
 
 std::wstring PassLabel(int pass, const std::wstring& activity) {
     return L"Pass " + std::to_wstring(pass) + L" — " + activity;
 }
 
-void ParseTaskLine(const std::string& raw) {
+void ParseTaskLine(const std::string& raw, const std::shared_ptr<DownloadJob>& job) {
+    if (!job) return;
     std::string line = TrimA(raw);
     if (line.empty()) return;
 
     if (line.rfind("=== ", 0) == 0) {
-        ResetDownloadProgressState();
+        ResetDownloadProgressState(job);
         return;
     }
     if (line.rfind("WINTERSTATIC_PROGRESS:", 0) == 0) {
@@ -2729,7 +2824,7 @@ void ParseTaskLine(const std::string& raw) {
         if (key.empty() || key == "NA") key = TrimA(fields[1]);
         if (key.empty() || key == "NA") key = "stream";
 
-        const int pass = EnsureDownloadPass(key);
+        const int pass = EnsureDownloadPass(job, key);
         if (pass <= 0) return;
 
         const unsigned long long downloaded = ParseUnsignedA(fields[2]);
@@ -2744,28 +2839,14 @@ void ParseTaskLine(const std::string& raw) {
         else if (percent <= 0.0 && total > 0) {
             percent = (static_cast<double>(downloaded) / static_cast<double>(total)) * 100.0;
         }
-        percent = std::max(0.0, std::min(100.0, percent));
-
-        // Fragmented DASH/HLS downloads can revise yt-dlp's total-size estimate
-        // while a stream is in progress, making the reported percentage move
-        // backwards. Keep the GUI monotonic for estimate wobble, but release the
-        // clamp if downloaded_bytes itself drops substantially: that indicates a
-        // genuine restart inside the same yt-dlp attempt rather than a moving total.
-        {
-            std::lock_guard<std::mutex> lock(g_progressStateMutex);
-            constexpr unsigned long long kRestartTolerance = 65536; // 64 KiB
-            if (g_lastDownloadedBytes > downloaded &&
-                g_lastDownloadedBytes - downloaded > kRestartTolerance) {
-                g_lastDisplayedPercent = 0.0;
-            }
-            g_lastDownloadedBytes = downloaded;
-
-            if (percent < g_lastDisplayedPercent) {
-                percent = g_lastDisplayedPercent;
-            } else {
-                g_lastDisplayedPercent = percent;
-            }
-        }
+        // Follow yt-dlp's current estimate directly. Fragmented downloads can
+        // legitimately revise that estimate in either direction, so the GUI no
+        // longer keeps a monotonic high-water mark. yt-dlp can briefly report 100%
+        // before a stream is actually finished; discard that one misleading update
+        // and wait for either the next live percentage or the real finished event.
+        if (status != "finished" && percent >= 100.0) return;
+        if (status == "finished") percent = 100.0;
+        else percent = std::max(0.0, std::min(99.9, percent));
 
         const bool hasVideo = CodecPresent(fields[9]);
         const bool hasAudio = CodecPresent(fields[10]);
@@ -2777,7 +2858,10 @@ void ParseTaskLine(const std::string& raw) {
         detail << std::fixed << std::setprecision(1) << percent << L"%";
         const std::string speedText = TrimA(fields[8]);
         if (!speedText.empty() && speedText != "NA") detail << L"  •  " << Utf8ToWide(speedText);
-        PostProgress(static_cast<int>(percent + 0.5), PassLabel(pass, activity), detail.str());
+        const int barPercent = status == "finished"
+            ? 100
+            : std::clamp(static_cast<int>(percent), 0, 99);
+        PostProgress(job, barPercent, PassLabel(pass, activity), detail.str());
         return;
     }
     if (line.rfind("WINTERSTATIC_POSTPROCESS:", 0) == 0) {
@@ -2785,7 +2869,7 @@ void ParseTaskLine(const std::string& raw) {
         const std::string postprocessor = fields.empty() ? "" : TrimA(fields[0]);
         const std::string status = fields.size() > 1 ? TrimA(fields[1]) : "";
         if (status != "finished") {
-            const int pass = EnsurePostProcessPass();
+            const int pass = EnsurePostProcessPass(job);
             const bool audio = postprocessor.find("ExtractAudio") != std::string::npos
                             || postprocessor.find("FFmpegExtractAudio") != std::string::npos;
             const bool merger = postprocessor.find("Merger") != std::string::npos;
@@ -2795,102 +2879,144 @@ void ParseTaskLine(const std::string& raw) {
             const std::wstring detail = audio ? L"Processing downloaded audio…"
                                       : merger ? L"Combining video and audio…"
                                                : L"Processing downloaded media…";
-            PostProgress(0, PassLabel(pass, activity), detail);
+            PostProgress(job, 0, PassLabel(pass, activity), detail);
         }
         return;
     }
     if (line.rfind("WINTERSTATIC_FINAL:", 0) == 0) {
-        PostLog(L"Saved: " + Utf8ToWide(line.substr(strlen("WINTERSTATIC_FINAL:"))));
+        PostJobLog(job, L"Saved: " + Utf8ToWide(line.substr(strlen("WINTERSTATIC_FINAL:"))));
         return;
     }
     if (line.rfind("[Merger]", 0) == 0) {
-        const int pass = EnsurePostProcessPass();
-        PostProgress(0, PassLabel(pass, L"Assembling"), L"Combining video and audio…");
+        const int pass = EnsurePostProcessPass(job);
+        PostProgress(job, 0, PassLabel(pass, L"Assembling"), L"Combining video and audio…");
         return;
     }
     if (line.rfind("[ExtractAudio]", 0) == 0) {
-        const int pass = EnsurePostProcessPass();
-        PostProgress(0, PassLabel(pass, L"Processing audio"), L"Processing downloaded audio…");
+        const int pass = EnsurePostProcessPass(job);
+        PostProgress(job, 0, PassLabel(pass, L"Processing audio"), L"Processing downloaded audio…");
         return;
     }
     if (line == "WINTERSTATIC_AUTO_ANON_FIRST") {
-        PostLog(L"Automatic mode: trying the normal anonymous path first.");
+        PostJobLog(job, L"Automatic mode: trying the normal anonymous path first.");
         return;
     }
     if (line == "WINTERSTATIC_AUTO_AUTH_REQUIRED_FALLBACK") {
-        PostLog(L"Automatic mode: YouTube explicitly requested authentication; retrying with the saved dedicated Edge session.");
+        PostJobLog(job, L"Automatic mode: YouTube explicitly requested authentication; retrying with the saved dedicated Edge session.");
         return;
     }
     if (line == "WINTERSTATIC_AUTO_AUTH_REQUIRED_NO_SESSION") {
-        PostLog(L"Automatic mode: YouTube requested authentication, but no confirmed saved Edge session is available.");
+        PostJobLog(job, L"Automatic mode: YouTube requested authentication, but no confirmed saved Edge session is available.");
         return;
     }
     if (line == "WINTERSTATIC_AUTH_SECOND_RETRY") {
-        PostLog(L"Authenticated attempt failed; retrying the saved dedicated Edge session once more.");
+        PostJobLog(job, L"Authenticated attempt failed; retrying the saved dedicated Edge session once more.");
         return;
     }
     if (line.rfind("WINTERSTATIC_RESILIENCE_IMPERSONATE:", 0) == 0) {
         const std::wstring target = Utf8ToWide(line.substr(strlen("WINTERSTATIC_RESILIENCE_IMPERSONATE:")));
-        PostLog(L"Resilience recovery: retrying with yt-dlp browser impersonation (" + target + L").");
+        PostJobLog(job, L"Resilience recovery: retrying with yt-dlp browser impersonation (" + target + L").");
         return;
     }
     if (line == "WINTERSTATIC_RESILIENCE_IMPERSONATE_UNAVAILABLE") {
-        PostLog(L"Resilience recovery: browser impersonation was suggested, but this yt-dlp build exposes no compatible Chrome target.");
+        PostJobLog(job, L"Resilience recovery: browser impersonation was suggested, but this yt-dlp build exposes no compatible Chrome target.");
         return;
     }
     if (line == "WINTERSTATIC_RESILIENCE_CHUNK") {
-        PostLog(L"Resilience recovery: retrying with conservative chunked HTTP transfer.");
+        PostJobLog(job, L"Resilience recovery: retrying with conservative chunked HTTP transfer.");
         return;
     }
     if (line == "WINTERSTATIC_FORMAT_RECOVERY") {
-        PostLog(L"Format recovery: retrying with yt-dlp best-available format selection.");
+        PostJobLog(job, L"Format recovery: retrying with yt-dlp best-available format selection.");
         return;
     }
     if (line == "WINTERSTATIC_DISCOVERY_START") {
-        PostLog(L"Unsupported URL recovery: inspecting the webpage for a direct media stream.");
+        PostJobLog(job, L"Unsupported URL recovery: inspecting the webpage for a direct media stream.");
         return;
     }
     if (line.rfind("WINTERSTATIC_DISCOVERY_FOUND:", 0) == 0) {
         const std::wstring kind = Utf8ToWide(line.substr(strlen("WINTERSTATIC_DISCOVERY_FOUND:")));
-        PostLog(L"Unsupported URL recovery: found " + kind + L"; retrying it through yt-dlp.");
+        PostJobLog(job, L"Unsupported URL recovery: found " + kind + L"; retrying it through yt-dlp.");
         return;
     }
     if (line == "WINTERSTATIC_DISCOVERY_NONE") {
-        PostLog(L"Unsupported URL recovery: no usable static media reference was found.");
+        PostJobLog(job, L"Unsupported URL recovery: no usable static media reference was found.");
         return;
     }
-    if (line.find("ERROR:") != std::string::npos) PostLog(Utf8ToWide(line));
+    if (line.find("ERROR:") != std::string::npos) PostJobLog(job, Utf8ToWide(line));
 }
 
-void MonitorTaskFiles(std::wstring logPath, std::wstring donePath, unsigned long long generation) {
-    size_t seen = 0;
-    while (generation == g_taskGeneration.load()) {
-        if (FileExists(logPath)) {
-            std::ifstream f(fs::path(logPath), std::ios::binary);
-            if (f) {
-                std::string all((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-                if (all.size() >= 3 && static_cast<unsigned char>(all[0]) == 0xEF && static_cast<unsigned char>(all[1]) == 0xBB && static_cast<unsigned char>(all[2]) == 0xBF) {
-                    all.erase(0, 3);
+void MonitorTaskFiles(std::wstring logPath, std::wstring donePath,
+                      const std::shared_ptr<DownloadJob>& job,
+                      unsigned long long generation) {
+    if (!job) return;
+
+    std::uintmax_t offset = 0;
+    std::string pending;
+
+    auto consumeChunk = [&](std::string chunk) {
+        if (offset == chunk.size() && chunk.size() >= 3 &&
+            static_cast<unsigned char>(chunk[0]) == 0xEF &&
+            static_cast<unsigned char>(chunk[1]) == 0xBB &&
+            static_cast<unsigned char>(chunk[2]) == 0xBF) {
+            chunk.erase(0, 3);
+        }
+
+        pending += chunk;
+        size_t start = 0;
+        while (true) {
+            const size_t nl = pending.find('\n', start);
+            if (nl == std::string::npos) break;
+            std::string line = pending.substr(start, nl - start);
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            ParseTaskLine(line, job);
+            start = nl + 1;
+        }
+        if (start > 0) pending.erase(0, start);
+    };
+
+    while (generation == job->generation.load()) {
+        std::error_code ec;
+        const std::uintmax_t size = fs::is_regular_file(fs::path(logPath), ec)
+            ? fs::file_size(fs::path(logPath), ec)
+            : 0;
+
+        if (!ec) {
+            if (size < offset) {
+                offset = 0;
+                pending.clear();
+            }
+            if (size > offset) {
+                std::ifstream f(fs::path(logPath), std::ios::binary);
+                if (f) {
+                    f.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+                    std::string chunk((std::istreambuf_iterator<char>(f)),
+                                      std::istreambuf_iterator<char>());
+                    offset += static_cast<std::uintmax_t>(chunk.size());
+                    consumeChunk(std::move(chunk));
                 }
-                std::vector<std::string> lines;
-                std::string line;
-                std::istringstream ss(all);
-                while (std::getline(ss, line)) {
-                    if (!line.empty() && line.back() == '\r') line.pop_back();
-                    lines.push_back(line);
-                }
-                for (size_t i = seen; i < lines.size(); ++i) ParseTaskLine(lines[i]);
-                seen = lines.size();
             }
         }
+
         if (FileExists(donePath)) {
+            if (!pending.empty()) {
+                std::string line = pending;
+                if (!line.empty() && line.back() == '\r') line.pop_back();
+                ParseTaskLine(line, job);
+                pending.clear();
+            }
+
             std::ifstream done{fs::path(donePath)};
             int code = 1;
             if (done) done >> code;
-            PostMessageW(g_main, WM_APP_TASK_DONE, static_cast<WPARAM>(code), static_cast<LPARAM>(generation));
+            auto* update = new TaskDoneUpdate{job->id, code, generation};
+            HWND main = g_main;
+            if (!main || !PostMessageW(main, WM_APP_TASK_DONE, 0, reinterpret_cast<LPARAM>(update))) {
+                delete update;
+            }
             return;
         }
-        Sleep(250);
+        Sleep(200);
     }
 }
 
@@ -2916,16 +3042,18 @@ bool LaunchPowerShellTask(const std::wstring& scriptPath, const std::wstring& ti
 }
 
 void StartDownload() {
-    if (g_busy.exchange(true)) {
-        MessageBoxW(g_main, L"A task is already running.", L"Download already running", MB_OK | MB_ICONINFORMATION);
+    auto job = ActiveJob();
+    if (!job) return;
+
+    SaveActiveJobUi();
+    if (job->running) {
+        MessageBoxW(g_main, L"This tab already has a running task.", L"Download already running",
+                    MB_OK | MB_ICONINFORMATION);
         return;
     }
 
     std::wstring ytdlp, output, ffmpeg;
-    if (!ValidateInputs(ytdlp, output, ffmpeg)) {
-        g_busy = false;
-        return;
-    }
+    if (!ValidateInputs(ytdlp, output, ffmpeg)) return;
 
     if (GetText(IDC_AUTH) == L"Automatic") {
         const AccountStatus status = InspectAccountSession();
@@ -2934,17 +3062,19 @@ void StartDownload() {
     }
 
     SaveSettings();
-    ResetDownloadProgressState();
+    SaveActiveJobUi();
+    ResetDownloadProgressState(job);
+
     const std::wstring taskDir = TempTaskDirectory();
     const std::wstring logPath = JoinPath(taskDir, L"download.log");
     const std::wstring donePath = JoinPath(taskDir, L"done.txt");
     const std::wstring scriptPath = JoinPath(taskDir, L"task.ps1");
-    const std::wstring title = UniqueConsoleTitle();
+    const std::wstring title = UniqueConsoleTitle(job->id);
     const std::wstring script = BuildDownloadScript(ytdlp, output, ffmpeg, logPath, donePath, title);
     if (!WriteUtf8BomFile(scriptPath, script)) {
         RemoveTaskDirectoryBestEffort(fs::path(taskDir));
-        g_busy = false;
-        MessageBoxW(g_main, L"Could not create the temporary PowerShell task script.", L"Download", MB_OK | MB_ICONERROR);
+        MessageBoxW(g_main, L"Could not create the temporary PowerShell task script.", L"Download",
+                    MB_OK | MB_ICONERROR);
         return;
     }
 
@@ -2953,130 +3083,169 @@ void StartDownload() {
     DWORD pid = 0;
     if (!LaunchPowerShellTask(scriptPath, title, pid)) {
         RemoveTaskDirectoryBestEffort(fs::path(taskDir));
-        g_busy = false;
         MessageBoxW(g_main, L"Could not open PowerShell.", L"Download", MB_OK | MB_ICONERROR);
         return;
     }
 
-    const unsigned long long generation = ++g_taskGeneration;
+    const unsigned long long generation = ++job->generation;
     {
-        std::lock_guard<std::mutex> lock(g_consoleMutex);
-        // Only the newest task is managed. Completed PowerShell windows are
-        // intentionally left to the user, but must never be nuked by a later task.
-        g_managedConsoles.clear();
-        g_managedConsoles.emplace_back(pid, title);
-        g_currentConsolePid = pid;
-        g_currentConsoleHwnd = nullptr;
-        g_currentConsoleTitle = title;
-        g_currentLogPath = logPath;
-        g_currentDonePath = donePath;
+        std::lock_guard<std::mutex> lock(job->consoleMutex);
+        job->consolePid = pid;
+        job->consoleHwnd = nullptr;
+        job->consoleTitle = title;
+        job->logPath = logPath;
+        job->donePath = donePath;
+        job->taskDir = taskDir;
     }
 
-    EnableWindow(GetDlgItem(g_main, IDC_DOWNLOAD), FALSE);
-    SetProgressPercent(0);
-    SetText(IDC_STAGE, L"Opening PowerShell");
-    SetText(IDC_DETAIL, L"");
-    AppendLogUi(L"Opening a live PowerShell window for yt-dlp…");
+    job->running = true;
+    job->finished = false;
+    job->exitCode = 0;
+    job->progressPercent = 0;
+    job->stage = L"Opening PowerShell";
+    job->detail.clear();
 
-    std::thread([pid, title, existingWindows, foregroundBefore]() {
+    RefreshActiveJobControls();
+    UpdateTabLabel(job);
+    AppendJobLogUi(job->id, L"Opening a live PowerShell window for yt-dlp...");
+
+    std::thread([job, pid, title, existingWindows, foregroundBefore]() {
         HWND moved = MoveConsoleRight(pid, title, 12000, existingWindows, foregroundBefore);
         if (moved) {
-            std::lock_guard<std::mutex> lock(g_consoleMutex);
-            if (g_currentConsolePid == pid && g_currentConsoleTitle == title) g_currentConsoleHwnd = moved;
+            std::lock_guard<std::mutex> lock(job->consoleMutex);
+            if (job->consolePid == pid && job->consoleTitle == title) job->consoleHwnd = moved;
         }
-        PostLog(moved ? L"PowerShell snapped to the right pane." : L"PowerShell opened; automatic snap skipped because no stable tracked terminal window was available.");
+        PostJobLog(job, moved
+            ? L"PowerShell snapped to the right pane."
+            : L"PowerShell opened; automatic snap skipped because no stable tracked terminal window was available.");
     }).detach();
-    std::thread(MonitorTaskFiles, logPath, donePath, generation).detach();
+
+    std::thread(MonitorTaskFiles, logPath, donePath, job, generation).detach();
 }
 
-void StopManagedConsoles() {
-    std::vector<std::pair<DWORD, std::wstring>> consoles;
+void TerminateJobTask(const std::shared_ptr<DownloadJob>& job) {
+    if (!job) return;
+
+    DWORD pid = 0;
+    HWND hwnd = nullptr;
+    std::wstring title;
     fs::path currentTaskDir;
     {
-        std::lock_guard<std::mutex> lock(g_consoleMutex);
-        consoles = g_managedConsoles;
-        if (!g_currentLogPath.empty()) currentTaskDir = fs::path(g_currentLogPath).parent_path();
+        std::lock_guard<std::mutex> lock(job->consoleMutex);
+        pid = job->consolePid;
+        hwnd = job->consoleHwnd;
+        title = job->consoleTitle;
+        if (!job->taskDir.empty()) currentTaskDir = fs::path(job->taskDir);
     }
 
-    if (consoles.empty()) {
-        AppendLogUi(L"No tracked PowerShell task is currently open.");
-        return;
-    }
+    // Invalidate this tab's monitor before touching its process tree. Other tabs
+    // keep their own generation counters and continue independently.
+    ++job->generation;
+    job->running = false;
 
-    // Invalidate any monitor thread before killing the process tree. A late
-    // exit-code file from the killed task must not overwrite the fresh GUI state.
-    ++g_taskGeneration;
-    g_busy = false;
-
-    bool stoppedAny = false;
     bool trackedProcessStillRunning = false;
-    for (const auto& c : consoles) {
-        // Guard against stale PID reuse: only taskkill the PID if it is still
-        // the PowerShell process that we launched for this task.
-        if (c.first && ProcessIdMatchesImage(c.first, L"powershell.exe")) {
-            std::wstring cmd = L"taskkill /PID " + std::to_wstring(c.first) + L" /T /F";
-            RunHiddenCapture(cmd, 8000);
-            stoppedAny = true;
-            Sleep(60);
-            if (ProcessIdMatchesImage(c.first, L"powershell.exe")) trackedProcessStillRunning = true;
+    if (pid && ProcessIdMatchesImage(pid, L"powershell.exe")) {
+        const std::wstring cmd = L"taskkill /PID " + std::to_wstring(pid) + L" /T /F";
+        RunHiddenCapture(cmd, 8000);
+
+        // Give taskkill a short bounded window to finish the process tree before
+        // deleting the temporary task folder.
+        const ULONGLONG waitUntil = GetTickCount64() + 1500;
+        while (GetTickCount64() < waitUntil && ProcessIdMatchesImage(pid, L"powershell.exe")) {
+            Sleep(50);
         }
-        // Windows Terminal may host the visible tab/window outside the tracked
-        // powershell.exe process tree. The unique task title is our safe fallback.
-        CloseTrackedWindows(c.first, c.second);
+        trackedProcessStillRunning = ProcessIdMatchesImage(pid, L"powershell.exe");
+    }
+
+    // Windows Terminal can host several PowerShell tabs in one top-level window.
+    // Never close a shared host just because one download tab is being stopped.
+    bool sharedTerminalWindow = false;
+    if (hwnd && IsWindow(hwnd)) {
+        for (const auto& other : g_jobs) {
+            if (!other || other == job) continue;
+            std::lock_guard<std::mutex> otherLock(other->consoleMutex);
+            if (other->consoleHwnd == hwnd) {
+                sharedTerminalWindow = true;
+                break;
+            }
+        }
+        if (!sharedTerminalWindow) CloseWindowHandle(hwnd);
+    } else if (g_jobs.size() == 1) {
+        CloseTrackedWindows(pid, title);
     }
 
     {
-        std::lock_guard<std::mutex> lock(g_consoleMutex);
-        g_managedConsoles.clear();
-        g_currentConsolePid = 0;
-        g_currentConsoleHwnd = nullptr;
-        g_currentConsoleTitle.clear();
-        g_currentLogPath.clear();
-        g_currentDonePath.clear();
+        std::lock_guard<std::mutex> lock(job->consoleMutex);
+        job->consolePid = 0;
+        job->consoleHwnd = nullptr;
+        job->consoleTitle.clear();
+        job->logPath.clear();
+        job->donePath.clear();
+        job->taskDir.clear();
     }
 
     if (!trackedProcessStillRunning && !currentTaskDir.empty()) {
         RemoveTaskDirectoryBestEffort(currentTaskDir);
     }
+}
 
-    EnableWindow(GetDlgItem(g_main, IDC_DOWNLOAD), TRUE);
-    SetProgressPercent(0);
-    SetText(IDC_STAGE, L"Nuked");
-    SetText(IDC_DETAIL, L"");
-    AppendLogUi(stoppedAny
-        ? L"Nuke: stopped the tracked PowerShell/yt-dlp process tree."
-        : L"Nuke: no running process tree was found; tracked windows were closed.");
+void ResetJobForReuse(const std::shared_ptr<DownloadJob>& job) {
+    if (!job) return;
+    ResetDownloadProgressState(job);
+    job->url.clear();
+    job->progressPercent = 0;
+    job->stage = L"Ready";
+    job->detail.clear();
+    job->logText.clear();
+    job->running = false;
+    job->finished = false;
+    job->exitCode = 0;
+}
+
+void StopManagedConsoles() {
+    auto job = ActiveJob();
+    if (!job) return;
+
+    // Nuke is the clean-slate action for one download tab. Keep the user's output,
+    // quality, authentication, and checkbox choices, but stop the task and clear
+    // the URL, progress, status, and log so the tab is ready to reuse.
+    SaveActiveJobUi();
+    TerminateJobTask(job);
+    ResetJobForReuse(job);
+    UpdateTabLabel(job);
+    LoadActiveJobUi();
 }
 
 void SnapCurrentConsole() {
+    auto job = ActiveJob();
+    if (!job) return;
+
     DWORD pid = 0;
     HWND hwnd = nullptr;
     std::wstring title;
     {
-        std::lock_guard<std::mutex> lock(g_consoleMutex);
-        pid = g_currentConsolePid;
-        hwnd = g_currentConsoleHwnd;
-        title = g_currentConsoleTitle;
+        std::lock_guard<std::mutex> lock(job->consoleMutex);
+        pid = job->consolePid;
+        hwnd = job->consoleHwnd;
+        title = job->consoleTitle;
     }
+
     if (!pid && title.empty() && (!hwnd || !IsWindow(hwnd))) {
-        AppendLogUi(L"No tracked PowerShell window is currently open.");
+        AppendJobLogUi(job->id, L"No tracked PowerShell window is currently open for this tab.");
         return;
     }
 
-    std::thread([pid, hwnd, title]() {
+    std::thread([job, pid, hwnd, title]() {
         HWND moved = nullptr;
         if (hwnd && IsWindow(hwnd) && MoveWindowToRect(hwnd, GetRightPaneRect())) {
             moved = hwnd;
         } else {
-            // Manual snap gets a longer search and may use the currently active
-            // terminal as a safe terminal-only fallback.
             HWND foregroundBefore = g_main;
             moved = MoveConsoleRight(pid, title, 5000, {}, foregroundBefore);
 
-            // If Windows Terminal has hidden both the child PID and our tab title
-            // from EnumWindows, an explicit user click is allowed one final safe
-            // fallback: when exactly one visible terminal-like top-level window
-            // exists, that is overwhelmingly likely to be the tracked task.
+            // The final one-terminal fallback is only safe when there is exactly
+            // one terminal-like top-level window. With multiple jobs this will
+            // normally be skipped in favor of PID/title matching.
             if (!moved) {
                 HWND onlyTerminal = nullptr;
                 int terminalCount = 0;
@@ -3089,11 +3258,15 @@ void SnapCurrentConsole() {
                 if (terminalCount == 1 && MoveWindowToRect(onlyTerminal, GetRightPaneRect())) moved = onlyTerminal;
             }
         }
+
         if (moved) {
-            std::lock_guard<std::mutex> lock(g_consoleMutex);
-            if (g_currentConsolePid == pid && g_currentConsoleTitle == title) g_currentConsoleHwnd = moved;
+            std::lock_guard<std::mutex> lock(job->consoleMutex);
+            if (job->consolePid == pid && job->consoleTitle == title) job->consoleHwnd = moved;
         }
-        PostLog(moved ? L"PowerShell snapped to the right pane." : L"Could not find a stable tracked PowerShell window to move safely.");
+
+        PostJobLog(job, moved
+            ? L"PowerShell snapped to the right pane."
+            : L"Could not find a stable tracked PowerShell window to move safely.");
     }).detach();
 }
 
@@ -3104,7 +3277,7 @@ void UpdateYtDlp() {
         return;
     }
 
-    // 0.1.37 keeps both backends on yt-dlp's official stable channel.
+    // Keep both backends on yt-dlp's official stable channel.
     // The primary always advances to the latest stable. The authenticated
     // YouTube slot follows that same stable unless its version is explicitly
     // blacklisted for authenticated-quality regressions. Nightlies are never
@@ -3315,6 +3488,372 @@ void SetComboText(HWND combo, const std::wstring& text, int fallback = 0) {
     SendMessageW(combo, CB_SETCURSEL, found == CB_ERR ? fallback : found, 0);
 }
 
+void StyleTabOverflowControl();
+
+std::wstring JobTabText(const std::shared_ptr<DownloadJob>& job) {
+    if (!job) return L"Download";
+    std::wstring text = L"Download " + std::to_wstring(job->id);
+    if (job->running) {
+        if (job->progressPercent > 0) text += L" (" + std::to_wstring(job->progressPercent) + L"%)";
+        else text += L" (running)";
+    } else if (job->finished) {
+        text += job->exitCode == 0 ? L" (done)" : L" (failed)";
+    }
+    return text;
+}
+
+// The native tab control sizes items from their stored text. Keep a fixed sizing
+// label in each job tab and paint the live status ourselves. This prevents progress
+// text changes from moving every tab to the right while preserving a compact '+' tab.
+const wchar_t* JobTabSizingText() {
+    return L"Download 12 (running)  x";
+}
+
+RECT TabCloseRectFromItemRect(RECT r) {
+    RECT close = r;
+    close.left = std::max(r.left + 20, r.right - 22);
+    close.right = r.right - 5;
+    close.top += 5;
+    close.bottom -= 5;
+    return close;
+}
+
+bool GetTabCloseRect(int index, RECT& close) {
+    if (!g_tabs || index < 0 || index >= static_cast<int>(g_jobs.size())) return false;
+    RECT item{};
+    if (!TabCtrl_GetItemRect(g_tabs, index, &item)) return false;
+    close = TabCloseRectFromItemRect(item);
+    return close.right > close.left && close.bottom > close.top;
+}
+
+int HitTestTabClose(POINT pt) {
+    if (!g_tabs) return -1;
+    for (int i = 0; i < static_cast<int>(g_jobs.size()); ++i) {
+        RECT close{};
+        if (GetTabCloseRect(i, close) && PtInRect(&close, pt)) return i;
+    }
+    return -1;
+}
+
+void UpdateTabLabel(const std::shared_ptr<DownloadJob>& job) {
+    if (!g_tabs || !job) return;
+    for (size_t i = 0; i < g_jobs.size(); ++i) {
+        if (g_jobs[i] != job) continue;
+        RECT r{};
+        if (TabCtrl_GetItemRect(g_tabs, static_cast<int>(i), &r))
+            InvalidateRect(g_tabs, &r, FALSE);
+        else
+            InvalidateRect(g_tabs, nullptr, FALSE);
+        return;
+    }
+}
+
+void SaveActiveJobUi() {
+    auto job = ActiveJob();
+    if (!job || !g_main) return;
+    job->url = GetText(IDC_URL);
+    job->output = GetText(IDC_OUTPUT);
+    job->quality = GetText(IDC_QUALITY);
+    job->auth = GetText(IDC_AUTH);
+    job->closePowerShellOnSuccess =
+        IsDlgButtonChecked(g_main, IDC_CLOSE_POWERSHELL) == BST_CHECKED;
+    job->browserSweep =
+        IsDlgButtonChecked(g_main, IDC_BROWSER_SWEEP) == BST_CHECKED;
+}
+
+void RefreshActiveJobControls() {
+    auto job = ActiveJob();
+    if (!job || !g_main) return;
+
+    SetProgressPercent(job->progressPercent);
+    SetText(IDC_STAGE, job->stage);
+    SetText(IDC_DETAIL, job->detail);
+
+    HWND log = GetDlgItem(g_main, IDC_LOG);
+    if (log) {
+        SetWindowTextW(log, job->logText.c_str());
+        const int len = GetWindowTextLengthW(log);
+        SendMessageW(log, EM_SETSEL, len, len);
+        SendMessageW(log, EM_SCROLLCARET, 0, 0);
+    }
+
+    EnableWindow(GetDlgItem(g_main, IDC_DOWNLOAD), job->running ? FALSE : TRUE);
+}
+
+void LoadActiveJobUi() {
+    auto job = ActiveJob();
+    if (!job || !g_main) return;
+
+    SetText(IDC_URL, job->url);
+    SetText(IDC_OUTPUT, job->output);
+
+    if (HWND quality = GetDlgItem(g_main, IDC_QUALITY)) {
+        SetComboText(quality, job->quality, 2);
+    }
+    if (HWND auth = GetDlgItem(g_main, IDC_AUTH)) {
+        SetComboText(auth, job->auth, 0);
+    }
+
+    CheckDlgButton(g_main, IDC_CLOSE_POWERSHELL,
+                   job->closePowerShellOnSuccess ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(g_main, IDC_BROWSER_SWEEP,
+                   job->browserSweep ? BST_CHECKED : BST_UNCHECKED);
+
+    RefreshActiveJobControls();
+}
+
+LRESULT CALLBACK TabOverflowSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
+                                                  UINT_PTR subclassId, DWORD_PTR) {
+    switch (msg) {
+    case WM_ERASEBKGND:
+        return 1;
+
+    case WM_PAINT: {
+        PAINTSTRUCT ps{};
+        HDC dc = BeginPaint(hwnd, &ps);
+        RECT client{};
+        GetClientRect(hwnd, &client);
+
+        POINT cursor{};
+        GetCursorPos(&cursor);
+        ScreenToClient(hwnd, &cursor);
+        const bool inside = PtInRect(&client, cursor) != FALSE;
+        const bool down = (GetKeyState(VK_LBUTTON) & 0x8000) != 0;
+
+        const int split = client.left + (client.right - client.left) / 2;
+        RECT left = client;
+        RECT right = client;
+        left.right = split;
+        right.left = split;
+
+        auto drawHalf = [&](const RECT& r, bool hovered, bool pointsRight) {
+            COLORREF fill = C_EDIT;
+            if (hovered) fill = down ? C_BUTTON_HOT : C_PANEL;
+            HBRUSH bg = CreateSolidBrush(fill);
+            FillRect(dc, &r, bg);
+            DeleteObject(bg);
+
+            const int cx = (r.left + r.right) / 2;
+            const int cy = (r.top + r.bottom) / 2;
+            POINT arrow[3]{};
+            if (pointsRight) {
+                arrow[0] = {cx - 2, cy - 4};
+                arrow[1] = {cx - 2, cy + 4};
+                arrow[2] = {cx + 3, cy};
+            } else {
+                arrow[0] = {cx + 2, cy - 4};
+                arrow[1] = {cx + 2, cy + 4};
+                arrow[2] = {cx - 3, cy};
+            }
+
+            HBRUSH arrowBrush = CreateSolidBrush(hovered ? C_TEXT : C_TEXT_DIM);
+            HPEN arrowPen = CreatePen(PS_SOLID, 1, hovered ? C_TEXT : C_TEXT_DIM);
+            HGDIOBJ oldBrush = SelectObject(dc, arrowBrush);
+            HGDIOBJ oldPen = SelectObject(dc, arrowPen);
+            Polygon(dc, arrow, 3);
+            SelectObject(dc, oldPen);
+            SelectObject(dc, oldBrush);
+            DeleteObject(arrowPen);
+            DeleteObject(arrowBrush);
+        };
+
+        const bool leftHover = inside && cursor.x < split;
+        const bool rightHover = inside && cursor.x >= split;
+        drawHalf(left, leftHover, false);
+        drawHalf(right, rightHover, true);
+
+        HBRUSH edge = CreateSolidBrush(C_PANEL_EDGE);
+        FrameRect(dc, &client, edge);
+        DeleteObject(edge);
+
+        HPEN divider = CreatePen(PS_SOLID, 1, C_PANEL_EDGE);
+        HGDIOBJ oldPen = SelectObject(dc, divider);
+        MoveToEx(dc, split, client.top + 1, nullptr);
+        LineTo(dc, split, client.bottom - 1);
+        SelectObject(dc, oldPen);
+        DeleteObject(divider);
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+
+    case WM_MOUSEMOVE: {
+        TRACKMOUSEEVENT tme{};
+        tme.cbSize = sizeof(tme);
+        tme.dwFlags = TME_LEAVE;
+        tme.hwndTrack = hwnd;
+        TrackMouseEvent(&tme);
+        LRESULT result = DefSubclassProc(hwnd, msg, wp, lp);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return result;
+    }
+
+    case WM_MOUSELEAVE:
+    case WM_LBUTTONDOWN:
+    case WM_LBUTTONUP: {
+        LRESULT result = DefSubclassProc(hwnd, msg, wp, lp);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return result;
+    }
+
+    case WM_NCDESTROY:
+        RemoveWindowSubclass(hwnd, TabOverflowSubclassProc, subclassId);
+        break;
+    }
+
+    return DefSubclassProc(hwnd, msg, wp, lp);
+}
+
+void StyleTabOverflowControl() {
+    if (!g_tabs) return;
+    HWND upDown = FindWindowExW(g_tabs, nullptr, L"msctls_updown32", nullptr);
+    if (!upDown) return;
+    SetWindowTheme(upDown, L"", L"");
+    SetWindowSubclass(upDown, TabOverflowSubclassProc, 3, 0);
+    InvalidateRect(upDown, nullptr, TRUE);
+}
+
+void InsertPlusTab() {
+    if (!g_tabs) return;
+    TCITEMW plus{};
+    plus.mask = TCIF_TEXT;
+    wchar_t text[] = L"+";
+    plus.pszText = text;
+    TabCtrl_InsertItem(g_tabs, static_cast<int>(g_jobs.size()), &plus);
+    StyleTabOverflowControl();
+}
+
+void InitializeJobTabsFromCurrentUi() {
+    if (!g_tabs || !g_jobs.empty()) return;
+
+    auto job = std::make_shared<DownloadJob>();
+    job->id = g_nextJobId++;
+    job->url = GetText(IDC_URL);
+    job->output = GetText(IDC_OUTPUT);
+    job->quality = GetText(IDC_QUALITY);
+    job->auth = GetText(IDC_AUTH);
+    job->closePowerShellOnSuccess =
+        IsDlgButtonChecked(g_main, IDC_CLOSE_POWERSHELL) == BST_CHECKED;
+    job->browserSweep =
+        IsDlgButtonChecked(g_main, IDC_BROWSER_SWEEP) == BST_CHECKED;
+
+    g_jobs.push_back(job);
+
+    TCITEMW item{};
+    item.mask = TCIF_TEXT;
+    item.pszText = const_cast<wchar_t*>(JobTabSizingText());
+    TabCtrl_InsertItem(g_tabs, 0, &item);
+    InsertPlusTab();
+
+    g_activeJobIndex = 0;
+    TabCtrl_SetCurSel(g_tabs, 0);
+    InvalidateRect(g_tabs, nullptr, TRUE);
+    LoadActiveJobUi();
+}
+
+void CreateNewJobTab() {
+    if (!g_tabs) return;
+    if (g_jobs.size() >= 12) {
+        MessageBoxW(g_main, L"This build supports up to 12 download tabs.",
+                    L"Download tabs", MB_OK | MB_ICONINFORMATION);
+        TabCtrl_SetCurSel(g_tabs, g_activeJobIndex);
+        return;
+    }
+
+    SaveActiveJobUi();
+    auto source = ActiveJob();
+
+    auto job = std::make_shared<DownloadJob>();
+    job->id = g_nextJobId++;
+    if (source) {
+        job->output = source->output;
+        job->quality = source->quality;
+        job->auth = source->auth;
+        job->closePowerShellOnSuccess = source->closePowerShellOnSuccess;
+        job->browserSweep = source->browserSweep;
+    } else {
+        job->output = GetText(IDC_OUTPUT);
+        job->quality = GetText(IDC_QUALITY);
+        job->auth = GetText(IDC_AUTH);
+        job->closePowerShellOnSuccess =
+            IsDlgButtonChecked(g_main, IDC_CLOSE_POWERSHELL) == BST_CHECKED;
+        job->browserSweep =
+            IsDlgButtonChecked(g_main, IDC_BROWSER_SWEEP) == BST_CHECKED;
+    }
+
+    const int newIndex = static_cast<int>(g_jobs.size());
+    g_jobs.push_back(job);
+
+    TCITEMW item{};
+    item.mask = TCIF_TEXT;
+    item.pszText = const_cast<wchar_t*>(JobTabSizingText());
+    TabCtrl_InsertItem(g_tabs, newIndex, &item);
+    StyleTabOverflowControl();
+
+    g_activeJobIndex = newIndex;
+    TabCtrl_SetCurSel(g_tabs, newIndex);
+    InvalidateRect(g_tabs, nullptr, TRUE);
+    LoadActiveJobUi();
+}
+
+void CloseJobTab(int index) {
+    if (!g_tabs || index < 0 || index >= static_cast<int>(g_jobs.size())) return;
+
+    // Save edits in the currently selected tab before reindexing the job vector.
+    SaveActiveJobUi();
+
+    const int oldActive = g_activeJobIndex;
+    auto job = g_jobs[static_cast<size_t>(index)];
+
+    // A closed tab must not leave an unmanaged PowerShell/yt-dlp process behind.
+    // Closing the whole GUI is different and still leaves active downloads running.
+    TerminateJobTask(job);
+
+    g_hoverCloseTab = -1;
+    g_pressedCloseTab = -1;
+    g_jobs.erase(g_jobs.begin() + index);
+    TabCtrl_DeleteItem(g_tabs, index);
+    StyleTabOverflowControl();
+
+    if (g_jobs.empty()) {
+        g_activeJobIndex = -1;
+        CreateNewJobTab();
+        return;
+    }
+
+    if (oldActive > index) {
+        g_activeJobIndex = oldActive - 1;
+    } else if (oldActive == index) {
+        g_activeJobIndex = std::min(index, static_cast<int>(g_jobs.size()) - 1);
+    } else {
+        g_activeJobIndex = oldActive;
+    }
+
+    g_activeJobIndex = std::clamp(g_activeJobIndex, 0, static_cast<int>(g_jobs.size()) - 1);
+    TabCtrl_SetCurSel(g_tabs, g_activeJobIndex);
+    InvalidateRect(g_tabs, nullptr, TRUE);
+    LoadActiveJobUi();
+}
+
+void HandleTabSelectionChanged() {
+    if (!g_tabs) return;
+    const int selected = TabCtrl_GetCurSel(g_tabs);
+    if (selected < 0) return;
+
+    SaveActiveJobUi();
+
+    if (selected == static_cast<int>(g_jobs.size())) {
+        CreateNewJobTab();
+        return;
+    }
+
+    if (selected >= 0 && selected < static_cast<int>(g_jobs.size())) {
+        g_activeJobIndex = selected;
+        InvalidateRect(g_tabs, nullptr, TRUE);
+        LoadActiveJobUi();
+    }
+}
+
 COLORREF ButtonColor(int id) {
     switch (id) {
     case IDC_DOWNLOAD: case IDC_CHECK_LOGIN: return C_GREEN;
@@ -3352,6 +3891,58 @@ void DrawOwnerButton(const DRAWITEMSTRUCT* dis) {
         InflateRect(&focus, -3, -3);
         DrawFocusRect(dis->hDC, &focus);
     }
+}
+
+void PaintTabItem(HDC dc, int index, const RECT& itemRect, bool selected) {
+    RECT r = itemRect;
+    HBRUSH bg = CreateSolidBrush(selected ? C_PANEL : C_EDIT);
+    FillRect(dc, &r, bg);
+    DeleteObject(bg);
+
+    HBRUSH edge = CreateSolidBrush(selected ? C_TEAL : C_PANEL_EDGE);
+    FrameRect(dc, &r, edge);
+    DeleteObject(edge);
+
+    const bool isJobTab = index >= 0 && index < static_cast<int>(g_jobs.size());
+    const std::wstring text = isJobTab ? JobTabText(g_jobs[static_cast<size_t>(index)]) : L"+";
+
+    RECT textRect = r;
+    if (isJobTab) {
+        textRect.left += 4;
+        textRect.right -= 23;
+    }
+
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, selected ? C_TEXT : C_TEXT_DIM);
+    HFONT old = static_cast<HFONT>(SelectObject(dc, g_smallFont));
+    DrawTextW(dc, text.c_str(), -1, &textRect,
+              DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    SelectObject(dc, old);
+
+    if (!isJobTab) return;
+
+    const RECT close = TabCloseRectFromItemRect(r);
+    const bool hot = index == g_hoverCloseTab;
+    const bool pressed = index == g_pressedCloseTab;
+    const COLORREF closeColor = pressed ? C_TEXT : (hot ? C_ERROR : C_TEXT_DIM);
+    HPEN pen = CreatePen(PS_SOLID, hot ? 2 : 1, closeColor);
+    HGDIOBJ oldPen = SelectObject(dc, pen);
+    const int cx = (close.left + close.right) / 2;
+    const int cy = (close.top + close.bottom) / 2;
+    const int d = 3;
+    MoveToEx(dc, cx - d, cy - d, nullptr);
+    LineTo(dc, cx + d + 1, cy + d + 1);
+    MoveToEx(dc, cx + d, cy - d, nullptr);
+    LineTo(dc, cx - d - 1, cy + d + 1);
+    SelectObject(dc, oldPen);
+    DeleteObject(pen);
+}
+
+void DrawTabItem(const DRAWITEMSTRUCT* dis) {
+    if (!dis || dis->CtlID != IDC_TABS) return;
+    const int index = static_cast<int>(dis->itemID);
+    const bool selected = g_tabs && index == TabCtrl_GetCurSel(g_tabs);
+    PaintTabItem(dis->hDC, index, dis->rcItem, selected);
 }
 
 void DrawComboItem(const DRAWITEMSTRUCT* dis) {
@@ -3453,7 +4044,8 @@ void LayoutControls(int cw, int ch) {
     const int margin = 8;
     const int gap = 9;
     const int panelW = std::max(720, cw - margin * 2);
-    int y = 64;
+    MoveCtl(IDC_TABS, margin + 4, 56, panelW - 8, 30);
+    int y = 92;
     g_panels.download = {margin, y, panelW, 220}; y += 220 + gap;
     g_panels.account = {margin, y, panelW, 132}; y += 132 + gap;
     g_panels.tools = {margin, y, panelW, 178}; y += 178 + gap;
@@ -3462,7 +4054,7 @@ void LayoutControls(int cw, int ch) {
 
     // Header
     MoveCtl(9001, 18, 14, 350, 34);
-    MoveCtl(9002, 370, 23, 68, 20);
+    MoveCtl(9002, 370, 23, 170, 20);
     MoveCtl(9003, std::max(500, cw - 185), 20, 175, 20);
 
     auto body = [](const RectI& p) { return RectI{p.x + 14, p.y + 38, p.w - 28, p.h - 48}; };
@@ -3579,6 +4171,84 @@ void CreateUi(HWND hwnd) {
     HWND ver = AddStatic((std::wstring(L"v") + APP_VERSION).c_str(), 9002); SendMessageW(ver, WM_SETFONT, reinterpret_cast<WPARAM>(g_smallFont), TRUE);
     HWND native = AddStatic(L"Native Win32 frontend", 9003, SS_RIGHT); SendMessageW(native, WM_SETFONT, reinterpret_cast<WPARAM>(g_smallFont), TRUE);
 
+    g_tabs = CreateWindowExW(0, WC_TABCONTROLW, L"",
+                              WS_CHILD | WS_VISIBLE | WS_TABSTOP | TCS_OWNERDRAWFIXED,
+                              0, 0, 10, 10, hwnd,
+                              reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_TABS)),
+                              GetModuleHandleW(nullptr), nullptr);
+    SendMessageW(g_tabs, WM_SETFONT, reinterpret_cast<WPARAM>(g_smallFont), TRUE);
+    SetWindowTheme(g_tabs, L"", L"");
+    SetWindowSubclass(g_tabs, [](HWND tab, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR) -> LRESULT {
+        if (msg == WM_MOUSEMOVE) {
+            POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+            const int hover = HitTestTabClose(pt);
+            if (hover != g_hoverCloseTab) {
+                g_hoverCloseTab = hover;
+                InvalidateRect(tab, nullptr, FALSE);
+            }
+            TRACKMOUSEEVENT tme{};
+            tme.cbSize = sizeof(tme);
+            tme.dwFlags = TME_LEAVE;
+            tme.hwndTrack = tab;
+            TrackMouseEvent(&tme);
+        } else if (msg == WM_MOUSELEAVE) {
+            if (g_hoverCloseTab != -1) {
+                g_hoverCloseTab = -1;
+                InvalidateRect(tab, nullptr, FALSE);
+            }
+        } else if (msg == WM_LBUTTONDOWN) {
+            POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+            const int closeIndex = HitTestTabClose(pt);
+            if (closeIndex >= 0) {
+                g_pressedCloseTab = closeIndex;
+                SetCapture(tab);
+                InvalidateRect(tab, nullptr, FALSE);
+                return 0;
+            }
+        } else if (msg == WM_LBUTTONUP && g_pressedCloseTab >= 0) {
+            POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+            const int pressed = g_pressedCloseTab;
+            const int releasedOver = HitTestTabClose(pt);
+            g_pressedCloseTab = -1;
+            if (GetCapture() == tab) ReleaseCapture();
+            InvalidateRect(tab, nullptr, FALSE);
+            if (releasedOver == pressed) CloseJobTab(pressed);
+            return 0;
+        } else if (msg == WM_CAPTURECHANGED && g_pressedCloseTab >= 0) {
+            g_pressedCloseTab = -1;
+            InvalidateRect(tab, nullptr, FALSE);
+        }
+
+        if (msg == WM_ERASEBKGND) return 1;
+        if (msg == WM_SIZE || msg == WM_WINDOWPOSCHANGED) {
+            LRESULT result = DefSubclassProc(tab, msg, wp, lp);
+            StyleTabOverflowControl();
+            return result;
+        }
+        if (msg == WM_PAINT) {
+            PAINTSTRUCT ps{};
+            HDC dc = BeginPaint(tab, &ps);
+            RECT client{};
+            GetClientRect(tab, &client);
+
+            HBRUSH strip = CreateSolidBrush(C_BG);
+            FillRect(dc, &client, strip);
+            DeleteObject(strip);
+
+            const int selectedIndex = TabCtrl_GetCurSel(tab);
+            const int count = TabCtrl_GetItemCount(tab);
+            for (int i = 0; i < count; ++i) {
+                RECT r{};
+                if (!TabCtrl_GetItemRect(tab, i, &r)) continue;
+                PaintTabItem(dc, i, r, i == selectedIndex);
+            }
+
+            EndPaint(tab, &ps);
+            return 0;
+        }
+        return DefSubclassProc(tab, msg, wp, lp);
+    }, 2, 0);
+
     AddStatic(L"Video URL", 9101); AddEdit(IDC_URL);
     AddButton(L"Paste", IDC_PASTE); AddButton(L"Clear", IDC_CLEAR);
     AddStatic(L"Save to", 9102); AddEdit(IDC_OUTPUT);
@@ -3668,6 +4338,8 @@ void CreateUi(HWND hwnd) {
     CheckDlgButton(hwnd, IDC_CLOSE_POWERSHELL, closePowerShellOnSuccess ? BST_CHECKED : BST_UNCHECKED);
     SetText(9104, L"Authentication");
     InvalidateRect(authLabel, nullptr, TRUE);
+
+    InitializeJobTabsFromCurrentUi();
 
     RECT r{}; GetClientRect(hwnd, &r); LayoutControls(r.right, r.bottom);
     AppendLogUi(L"Ready. Native Win32 frontend initialized.");
@@ -3781,9 +4453,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_COMMAND:
         HandleCommand(LOWORD(wParam), HIWORD(wParam));
         return 0;
+    case WM_NOTIFY: {
+        const auto* hdr = reinterpret_cast<const NMHDR*>(lParam);
+        if (hdr && hdr->idFrom == IDC_TABS && hdr->code == TCN_SELCHANGE) {
+            HandleTabSelectionChanged();
+            return 0;
+        }
+        break;
+    }
     case WM_DRAWITEM: {
         const auto* dis = reinterpret_cast<const DRAWITEMSTRUCT*>(lParam);
         if (dis->CtlType == ODT_BUTTON) { DrawOwnerButton(dis); return TRUE; }
+        if (dis->CtlType == ODT_TAB && dis->CtlID == IDC_TABS) { DrawTabItem(dis); return TRUE; }
         if (dis->CtlType == ODT_COMBOBOX) { DrawComboItem(dis); return TRUE; }
         if (dis->CtlType == ODT_STATIC && dis->CtlID == IDC_PROGRESS) { DrawProgress(dis); return TRUE; }
         return FALSE;
@@ -3816,7 +4497,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_GETMINMAXINFO: {
         auto* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
         mmi->ptMinTrackSize.x = 780;
-        mmi->ptMinTrackSize.y = 760;
+        mmi->ptMinTrackSize.y = 790;
         return 0;
     }
     case WM_APP_LOG: {
@@ -3856,29 +4537,60 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_APP_PROGRESS: {
         auto* p = reinterpret_cast<ProgressUpdate*>(lParam);
         if (p) {
-            SetProgressPercent(p->percent);
-            SetText(IDC_STAGE, p->stage);
-            SetText(IDC_DETAIL, p->detail);
+            auto job = FindJobById(p->jobId);
+            if (job) {
+                job->progressPercent = std::clamp(p->percent, 0, 100);
+                job->stage = p->stage;
+                job->detail = p->detail;
+                UpdateTabLabel(job);
+
+                auto active = ActiveJob();
+                if (active && active->id == job->id) {
+                    SetProgressPercent(job->progressPercent);
+                    SetText(IDC_STAGE, job->stage);
+                    SetText(IDC_DETAIL, job->detail);
+                }
+            }
             delete p;
         }
         return 0;
     }
-    case WM_APP_TASK_DONE: {
-        const int code = static_cast<int>(wParam);
-        const unsigned long long generation = static_cast<unsigned long long>(lParam);
-        if (generation != g_taskGeneration.load()) return 0;
-        g_busy = false;
-        EnableWindow(GetDlgItem(hwnd, IDC_DOWNLOAD), TRUE);
-        if (code == 0) {
-            SetProgressPercent(100);
-            SetText(IDC_STAGE, L"Complete");
-            SetText(IDC_DETAIL, L"Download and assembly completed successfully");
-            AppendLogUi(L"Download finished successfully.");
-        } else {
-            SetText(IDC_STAGE, L"Failed — exit code " + std::to_wstring(code));
-            SetText(IDC_DETAIL, L"See the visible PowerShell window for yt-dlp's full output");
-            AppendLogUi(L"Download failed with exit code " + std::to_wstring(code) + L".");
+    case WM_APP_JOB_LOG: {
+        auto* update = reinterpret_cast<JobLogUpdate*>(lParam);
+        if (update) {
+            AppendJobLogUi(update->jobId, update->text);
+            delete update;
         }
+        return 0;
+    }
+    case WM_APP_TASK_DONE: {
+        auto* update = reinterpret_cast<TaskDoneUpdate*>(lParam);
+        if (!update) return 0;
+
+        auto job = FindJobById(update->jobId);
+        if (job && update->generation == job->generation.load()) {
+            job->running = false;
+            job->finished = true;
+            job->exitCode = update->code;
+
+            if (update->code == 0) {
+                job->progressPercent = 100;
+                job->stage = L"Complete";
+                job->detail = L"Download and assembly completed successfully";
+                AppendJobLogUi(job->id, L"Download finished successfully.");
+            } else {
+                job->stage = L"Failed - exit code " + std::to_wstring(update->code);
+                job->detail = L"See the visible PowerShell window for yt-dlp's full output";
+                AppendJobLogUi(job->id, L"Download failed with exit code " +
+                                        std::to_wstring(update->code) + L".");
+            }
+
+            UpdateTabLabel(job);
+            auto active = ActiveJob();
+            if (active && active->id == job->id) RefreshActiveJobControls();
+        }
+
+        delete update;
         return 0;
     }
     case WM_CLOSE:

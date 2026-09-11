@@ -1,10 +1,8 @@
 # WinterStatic yt-dlp Downloader
 
-**Version 0.1.37**
+**Version 0.1.38**
 
-![WinterStatic yt-dlp Downloader](yt-dlp_winterstatic.png)
-
-WinterStatic yt-dlp Downloader is a native C++17 / Win32 frontend for [`yt-dlp`](https://github.com/yt-dlp/yt-dlp). It provides a compact Windows GUI, FFmpeg support, authenticated YouTube downloads through a dedicated Microsoft Edge profile, and a visible PowerShell task window.
+WinterStatic yt-dlp Downloader is a native C++17 / Win32 frontend for [`yt-dlp`](https://github.com/yt-dlp/yt-dlp). It provides a compact Windows GUI, multiple independent download tabs, FFmpeg support, authenticated YouTube downloads through a dedicated Microsoft Edge profile, and visible PowerShell task windows.
 
 It also adds its own recovery layer. For some pages that yt-dlp cannot handle directly, WinterStatic can scan page metadata and media references, then optionally use a visible browser sweep to find streams exposed at runtime. Recovered media is passed back to yt-dlp for the actual download.
 
@@ -14,6 +12,9 @@ Project: https://github.com/WinterStatic/yt-dlp-WinterStatic
 
 - Native C++17 / Win32 interface with no Python, Qt, .NET, or other non-system GUI runtime.
 - Portable Windows build.
+- Up to 12 independent download tabs in one window.
+- Each tab keeps its own URL, output options, progress, log, and PowerShell / yt-dlp task.
+- Tabs can be closed with their `x` button. Closing a running tab stops that tab's task before removing it.
 - Quality presets:
   - Best quality
   - Best MP4-compatible
@@ -28,11 +29,12 @@ Project: https://github.com/WinterStatic/yt-dlp-WinterStatic
   - Anonymous
   - Use account browser
 - Dedicated Microsoft Edge profile for authenticated YouTube use.
-- Retry and recovery handling for common network, format, 403/429, 404, and unsupported URL failures.
+- Recovery for common network, format, 403/429, 404, and unsupported URL failures.
+- Can recover media from some pages that yt-dlp reports as unsupported by scanning page metadata and media references.
 - Optional Browser sweep for difficult pages that only expose media during browser activity.
 - Visible PowerShell window with the full yt-dlp output.
 - Optional Close PowerShell on success setting. Failed tasks stay open for inspection.
-- Nuke task control for terminating the currently tracked PowerShell / yt-dlp process tree.
+- Nuke task control for stopping the selected tab's task and returning that tab to a clean ready state.
 - Dynamic GUI pass reporting for video, audio, assembly, and post-processing work.
 - Persistent `settings.ini`.
 
@@ -43,7 +45,7 @@ Project: https://github.com/WinterStatic/yt-dlp-WinterStatic
 - `app.manifest` - Windows application identity, DPI awareness, Common Controls, and long-path declarations.
 - `app.ico` / `app-arrow-transparent.png` - Application icon and source artwork.
 - `build-native.bat` - Builds the frontend and prepares the portable package.
-- `yt-dlp_winterstatic.png` - Screenshot used by this README.
+- `yt-dlp_winterstatic.png` - Repository screenshot asset.
 - `settings.ini` - Clean settings template.
 - `LICENSE` - MIT license for the frontend source.
 - `THIRD-PARTY-NOTICE.txt` - Notes for yt-dlp, FFmpeg, Microsoft Edge use, and redistribution.
@@ -70,7 +72,7 @@ build-native.bat
 A successful build creates:
 
 ```text
-WinterStatic-yt-dlp-Downloader-0.1.37-portable
+WinterStatic-yt-dlp-Downloader-0.1.38-portable
 ```
 
 For a GitHub release, run:
@@ -82,8 +84,8 @@ build-native.bat release
 Release mode also creates:
 
 ```text
-WinterStatic-yt-dlp-Downloader-0.1.37-portable.zip
-WinterStatic-yt-dlp-Downloader-0.1.37-source.zip
+WinterStatic-yt-dlp-Downloader-0.1.38-portable.zip
+WinterStatic-yt-dlp-Downloader-0.1.38-source.zip
 ```
 
 The source ZIP contains the public frontend source, resources, build files, documentation, and screenshot. It does not include `Tools`, browser profile data, downloaded media, or generated build output.
@@ -187,7 +189,9 @@ Downloads run in a visible PowerShell window so yt-dlp's full output remains ava
 - Closing the GUI does not kill an active download.
 - `Ctrl+C` remains available in PowerShell.
 - **Snap PowerShell right** retries terminal placement beside the downloader.
-- **Nuke task** terminates the currently tracked task tree.
+- **Nuke task** stops the selected tab's task and clears its URL, progress, status, and GUI log. Output, quality, authentication, and checkbox choices are kept for reuse.
+- Closing a tab also stops that tab's tracked task before removing the tab.
+- Closing the main GUI still leaves active PowerShell downloads running.
 - **Close PowerShell on success** can close successful tasks automatically. Failed tasks stay open.
 
 A cancelled yt-dlp task may leave a `.part` file. That is normal yt-dlp behaviour.
@@ -208,9 +212,9 @@ Pass 2 - Downloading audio
 Pass 3 - Assembling
 ```
 
-The progress display smooths estimate changes during fragmented downloads while still detecting a real yt-dlp restart inside the same pass.
+The GUI follows yt-dlp's current reported percentage directly. Fragmented downloads can revise their estimate in either direction, so the displayed percentage may occasionally move backwards. A premature 100% report is ignored until yt-dlp reports the stream as finished.
 
-The visible PowerShell window remains the detailed source of yt-dlp output.
+Each download tab tracks its own progress independently. The visible PowerShell window remains the detailed source of yt-dlp output.
 
 ## SETTINGS
 
@@ -264,7 +268,19 @@ Before publishing a portable package containing third-party binaries, check `THI
 
 ## VERSION HISTORY
 
-0.1.37 is the first public GitHub release.
+0.1.37 was the first public GitHub release. Earlier 0.1.x versions were private development builds.
+
+### 0.1.38 - MULTI-DOWNLOAD TABS AND PROGRESS RELIABILITY
+
+- Added up to 12 independent download tabs in one application window.
+- Each tab keeps its own URL, output options, progress, GUI log, and PowerShell / yt-dlp task.
+- Added an `x` close control to each download tab. Closing a running tab stops its tracked task before removing the tab.
+- Kept the `+` tab for opening new download tabs.
+- Stopped live status text from resizing tabs, so progress changes no longer move the tabs or the `+` control left and right.
+- Added dark styling for the tab strip and its overflow scroll buttons.
+- Simplified GUI progress reporting to follow yt-dlp's current estimate directly instead of forcing a monotonic percentage. Premature non-finished 100% reports are ignored.
+- Nuke task now stops the selected task and resets that tab to a clean ready state while keeping its output, quality, authentication, and checkbox choices.
+- PowerShell placement still waits for a stable terminal window before moving it.
 
 ### 0.1.37 - STABLE YT-DLP POLICY, RELEASE PACKAGING, HOVER HELP
 
