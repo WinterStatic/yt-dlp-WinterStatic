@@ -48,7 +48,7 @@ namespace fs = std::filesystem;
 // -----------------------------------------------------------------------------
 
 constexpr wchar_t APP_NAME[] = L"WinterStatic yt-dlp Downloader";
-constexpr wchar_t APP_VERSION[] = L"0.1.38";
+constexpr wchar_t APP_VERSION[] = L"0.1.39";
 constexpr wchar_t MAIN_CLASS[] = L"WinterStaticYtDlpDownloaderWindow";
 constexpr wchar_t SETTINGS_FILE[] = L"settings.ini";
 
@@ -92,6 +92,7 @@ constexpr int IDC_BROWSE_OUTPUT = 1005;
 constexpr int IDC_OPEN_OUTPUT = 1006;
 constexpr int IDC_QUALITY = 1007;
 constexpr int IDC_AUTH = 1008;
+constexpr int IDC_FORMAT = 1009;
 
 constexpr int IDC_ACCOUNT_STATUS = 1101;
 constexpr int IDC_OPEN_BROWSER = 1102;
@@ -154,6 +155,7 @@ struct DownloadJob {
     std::wstring url;
     std::wstring output;
     std::wstring quality{L"Maximum 1080p"};
+    std::wstring formatPreference{L"Automatic"};
     std::wstring auth{L"Automatic"};
     bool closePowerShellOnSuccess{false};
     bool browserSweep{false};
@@ -325,7 +327,7 @@ std::wstring GetControlText(HWND h) {
 
 bool UsesPaddedStaticText(int id) {
     switch (id) {
-    case 9101: case 9102: case 9103: case 9104: case 9105:
+    case 9101: case 9102: case 9103: case 9104: case 9105: case 9106:
     case 9201: case IDC_ACCOUNT_STATUS:
     case 9301: case 9302: case 9303:
     case IDC_YTDLP_STATUS: case IDC_BROWSER_STATUS: case IDC_FFMPEG_STATUS:
@@ -467,6 +469,7 @@ void SaveSettings() {
     WriteIni(L"General", L"YtDlpPath", GetText(IDC_YTDLP));
     WriteIni(L"General", L"FfmpegPath", GetText(IDC_FFMPEG));
     WriteIni(L"General", L"Quality", GetText(IDC_QUALITY));
+    WriteIni(L"General", L"PreferredFormat", GetText(IDC_FORMAT));
     WriteIni(L"General", L"Authentication", GetText(IDC_AUTH));
     WriteIni(L"General", L"ClosePowerShellOnSuccess",
              IsDlgButtonChecked(g_main, IDC_CLOSE_POWERSHELL) == BST_CHECKED ? L"1" : L"0");
@@ -1118,36 +1121,43 @@ bool CopyToClipboard(const std::wstring& text) {
 
 std::vector<std::wstring> BuildFormatArgs(bool hasFfmpeg) {
     const std::wstring quality = GetText(IDC_QUALITY);
-    if (quality == L"Best quality") {
-        return hasFfmpeg ? std::vector<std::wstring>{L"-f", L"bv*+ba/b"}
-                         : std::vector<std::wstring>{L"-f", L"best"};
-    }
-    if (quality == L"Best MP4-compatible") {
-        return hasFfmpeg
-            ? std::vector<std::wstring>{L"-f", L"bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b", L"--merge-output-format", L"mp4"}
-            : std::vector<std::wstring>{L"-f", L"best[ext=mp4]/best"};
-    }
-    if (quality == L"Maximum 1080p") {
-        // Quality-capped mode should prefer resolution, not container.
-        // The old standalone's proven bv*+ba/b behavior is preserved here,
-        // with only a height cap added. Users who specifically need MP4 can
-        // choose the separate Best MP4-compatible mode.
-        return hasFfmpeg
-            ? std::vector<std::wstring>{L"-f", L"bv*[height<=?1080]+ba/b[height<=?1080]"}
-            : std::vector<std::wstring>{L"-f", L"best[height<=?1080]/best"};
-    }
-    if (quality == L"Maximum 720p") {
-        return hasFfmpeg
-            ? std::vector<std::wstring>{L"-f", L"bv*[height<=?720]+ba/b[height<=?720]"}
-            : std::vector<std::wstring>{L"-f", L"best[height<=?720]/best"};
-    }
+    const std::wstring preference = GetText(IDC_FORMAT);
+    const bool preferMp4 = preference == L"Prefer MP4";
+    const bool preferWebm = preference == L"Prefer WebM";
+
+    auto videoSelector = [&](const wchar_t* height) -> std::wstring {
+        const std::wstring cap = height ? std::wstring(L"[height<=?") + height + L"]" : L"";
+        if (preferMp4) {
+            return L"bv*" + cap + L"[ext=mp4]+ba[ext=m4a]/b" + cap + L"[ext=mp4]/bv*" + cap + L"+ba/b" + cap;
+        }
+        if (preferWebm) {
+            return L"bv*" + cap + L"[ext=webm]+ba[ext=webm]/b" + cap + L"[ext=webm]/bv*" + cap + L"+ba/b" + cap;
+        }
+        return L"bv*" + cap + L"+ba/b" + cap;
+    };
+
+    auto singleFileSelector = [&](const wchar_t* height) -> std::wstring {
+        const std::wstring cap = height ? std::wstring(L"[height<=?") + height + L"]" : L"";
+        if (preferMp4) return L"best" + cap + L"[ext=mp4]/best" + cap + L"/best";
+        if (preferWebm) return L"best" + cap + L"[ext=webm]/best" + cap + L"/best";
+        return height ? L"best" + cap + L"/best" : L"best";
+    };
+
     if (quality == L"Audio only (source format)") {
+        std::wstring selector = L"bestaudio/best";
+        if (preferMp4) selector = L"bestaudio[ext=m4a]/bestaudio/best";
+        else if (preferWebm) selector = L"bestaudio[ext=webm]/bestaudio/best";
         return hasFfmpeg
-            ? std::vector<std::wstring>{L"-f", L"bestaudio/best", L"-x"}
-            : std::vector<std::wstring>{L"-f", L"bestaudio/best"};
+            ? std::vector<std::wstring>{L"-f", selector, L"-x"}
+            : std::vector<std::wstring>{L"-f", selector};
     }
-    return hasFfmpeg ? std::vector<std::wstring>{L"-f", L"bv*+ba/b"}
-                     : std::vector<std::wstring>{L"-f", L"best"};
+
+    const wchar_t* height = nullptr;
+    if (quality == L"Maximum 1080p") height = L"1080";
+    else if (quality == L"Maximum 720p") height = L"720";
+
+    if (hasFfmpeg) return {L"-f", videoSelector(height)};
+    return {L"-f", singleFileSelector(height)};
 }
 
 std::vector<std::wstring> BuildBaseArgs(const std::wstring& output, const std::wstring& ffmpeg) {
@@ -3207,7 +3217,7 @@ void StopManagedConsoles() {
     if (!job) return;
 
     // Nuke is the clean-slate action for one download tab. Keep the user's output,
-    // quality, authentication, and checkbox choices, but stop the task and clear
+    // quality, format preference, authentication, and checkbox choices, but stop the task and clear
     // the URL, progress, status, and log so the tab is ready to reuse.
     SaveActiveJobUi();
     TerminateJobTask(job);
@@ -3554,6 +3564,7 @@ void SaveActiveJobUi() {
     job->url = GetText(IDC_URL);
     job->output = GetText(IDC_OUTPUT);
     job->quality = GetText(IDC_QUALITY);
+    job->formatPreference = GetText(IDC_FORMAT);
     job->auth = GetText(IDC_AUTH);
     job->closePowerShellOnSuccess =
         IsDlgButtonChecked(g_main, IDC_CLOSE_POWERSHELL) == BST_CHECKED;
@@ -3588,7 +3599,10 @@ void LoadActiveJobUi() {
     SetText(IDC_OUTPUT, job->output);
 
     if (HWND quality = GetDlgItem(g_main, IDC_QUALITY)) {
-        SetComboText(quality, job->quality, 2);
+        SetComboText(quality, job->quality, 1);
+    }
+    if (HWND format = GetDlgItem(g_main, IDC_FORMAT)) {
+        SetComboText(format, job->formatPreference, 0);
     }
     if (HWND auth = GetDlgItem(g_main, IDC_AUTH)) {
         SetComboText(auth, job->auth, 0);
@@ -3731,6 +3745,7 @@ void InitializeJobTabsFromCurrentUi() {
     job->url = GetText(IDC_URL);
     job->output = GetText(IDC_OUTPUT);
     job->quality = GetText(IDC_QUALITY);
+    job->formatPreference = GetText(IDC_FORMAT);
     job->auth = GetText(IDC_AUTH);
     job->closePowerShellOnSuccess =
         IsDlgButtonChecked(g_main, IDC_CLOSE_POWERSHELL) == BST_CHECKED;
@@ -3768,12 +3783,14 @@ void CreateNewJobTab() {
     if (source) {
         job->output = source->output;
         job->quality = source->quality;
+        job->formatPreference = source->formatPreference;
         job->auth = source->auth;
         job->closePowerShellOnSuccess = source->closePowerShellOnSuccess;
         job->browserSweep = source->browserSweep;
     } else {
         job->output = GetText(IDC_OUTPUT);
         job->quality = GetText(IDC_QUALITY);
+        job->formatPreference = GetText(IDC_FORMAT);
         job->auth = GetText(IDC_AUTH);
         job->closePowerShellOnSuccess =
             IsDlgButtonChecked(g_main, IDC_CLOSE_POWERSHELL) == BST_CHECKED;
@@ -3946,7 +3963,7 @@ void DrawTabItem(const DRAWITEMSTRUCT* dis) {
 }
 
 void DrawComboItem(const DRAWITEMSTRUCT* dis) {
-    if (dis->CtlID != IDC_QUALITY && dis->CtlID != IDC_AUTH) return;
+    if (dis->CtlID != IDC_QUALITY && dis->CtlID != IDC_FORMAT && dis->CtlID != IDC_AUTH) return;
     RECT r = dis->rcItem;
     bool selected = (dis->itemState & ODS_SELECTED) != 0;
     COLORREF bg = selected ? C_COMBO_HOT : C_COMBO;
@@ -4078,7 +4095,15 @@ void LayoutControls(int cw, int ch) {
     MoveCtl(9102, d.x, r1 + 3, labelW - 8, labelH); MoveCtl(IDC_OUTPUT, fieldX, r1 + 3, fieldW, 24);
     MoveCtl(IDC_BROWSE_OUTPUT, fieldX + fieldW + btnGap, r1, btnW, buttonH); MoveCtl(IDC_OPEN_OUTPUT, fieldX + fieldW + btnGap + btnW + btnGap, r1, btnW, buttonH);
     const int r2 = r1 + rowH + 6;
-    MoveCtl(9103, d.x, r2 + 3, labelW - 8, labelH); MoveCtl(IDC_QUALITY, fieldX, r2, fieldW, 220);
+    MoveCtl(9103, d.x, r2 + 3, labelW - 8, labelH);
+    const int qualityW = std::max(210, (d.w - labelW) * 46 / 100);
+    const int formatGap = 10;
+    const int formatLabelW = 62;
+    const int formatX = fieldX + qualityW + formatGap;
+    const int formatW = std::max(120, d.x + d.w - formatX - formatLabelW);
+    MoveCtl(IDC_QUALITY, fieldX, r2, qualityW, 220);
+    MoveCtl(9106, formatX, r2 + 3, formatLabelW - 4, labelH);
+    MoveCtl(IDC_FORMAT, formatX + formatLabelW, r2, formatW, 180);
     const int r3 = r2 + rowH + 6;
     MoveCtl(9104, d.x, r3 + 3, labelW - 8, labelH); MoveCtl(IDC_AUTH, fieldX, r3, fieldW, 180);
     MoveCtl(9105, fieldX + 2, r3 + 35, std::max(300, d.w - labelW - 5), 22);
@@ -4254,7 +4279,9 @@ void CreateUi(HWND hwnd) {
     AddStatic(L"Save to", 9102); AddEdit(IDC_OUTPUT);
     AddButton(L"Browse", IDC_BROWSE_OUTPUT); AddButton(L"Open", IDC_OPEN_OUTPUT);
     AddStatic(L"Quality", 9103);
-    HWND quality = AddCombo(IDC_QUALITY, {L"Best quality", L"Best MP4-compatible", L"Maximum 1080p", L"Maximum 720p", L"Audio only (source format)"});
+    HWND quality = AddCombo(IDC_QUALITY, {L"Best quality", L"Maximum 1080p", L"Maximum 720p", L"Audio only (source format)"});
+    AddStatic(L"Format", 9106);
+    HWND format = AddCombo(IDC_FORMAT, {L"Automatic", L"Prefer MP4", L"Prefer WebM"});
     HWND authLabel = AddStatic(L"Authentication", 9104, SS_LEFT | SS_CENTERIMAGE | SS_NOPREFIX);
     HWND auth = AddCombo(IDC_AUTH, {L"Automatic", L"Anonymous", L"Use account browser"});
     HWND authHint = AddStatic(L"Automatic tries anonymously first and uses the saved Edge login only when YouTube explicitly requires authentication.", 9105, SS_LEFT | SS_CENTERIMAGE);
@@ -4289,6 +4316,9 @@ void CreateUi(HWND hwnd) {
         L"Left: primary backend, always the latest official stable release (never nightly).\n"
         L"Right: authenticated YouTube backend, normally the latest stable unless that release is on the auth blacklist.\n"
         L"Current auth blacklist: 2026.08.19. '--' means the authenticated helper is missing or unreadable.");
+    AddTooltip(format,
+        L"Container preference only. WinterStatic tries the selected family first, then falls back to the best available format rather than failing.\n"
+        L"Prefer MP4 pairs MP4 video with M4A audio where possible. Prefer WebM pairs WebM video and audio where possible. Audio-only maps MP4 preference to M4A.");
     AddTooltip(browserSweep,
         L"Optional last-resort browser-assisted recovery.\n"
         L"If normal yt-dlp attempts, resilience retries, and static discovery fail, WinterStatic may open an isolated visible Edge/Chrome/Brave window and observe its network requests for up to 30 seconds.\n"
@@ -4330,7 +4360,17 @@ void CreateUi(HWND hwnd) {
     SetText(IDC_YTDLP, savedYtdlp);
     SetText(IDC_FFMPEG, savedFfmpeg);
     SetText(IDC_BROWSER_PATH, g_accountBrowserExe);
-    SetComboText(quality, ReadIni(L"General", L"Quality", L"Maximum 1080p"), 2);
+    std::wstring savedQuality = ReadIni(L"General", L"Quality", L"Maximum 1080p");
+    std::wstring savedFormat = ReadIni(L"General", L"PreferredFormat", L"");
+    // Migrate the old combined quality/container preset without changing the
+    // user's effective preference on first launch after upgrading from 0.1.38.
+    if (savedQuality == L"Best MP4-compatible") {
+        savedQuality = L"Best quality";
+        if (savedFormat.empty()) savedFormat = L"Prefer MP4";
+    }
+    if (savedFormat.empty()) savedFormat = L"Automatic";
+    SetComboText(quality, savedQuality, 1);
+    SetComboText(format, savedFormat, 0);
     SetComboText(auth, ReadIni(L"General", L"Authentication", L"Automatic"), 0);
     const bool closePowerShellOnSuccess = ReadIni(L"General", L"ClosePowerShellOnSuccess", L"0") == L"1";
     const bool browserAssistedRecovery = ReadIni(L"General", L"BrowserAssistedRecovery", L"0") == L"1";
@@ -4429,6 +4469,7 @@ void HandleCommand(int id, int code) {
     case IDC_CLOSE_POWERSHELL: SaveSettings(); break;
     case IDC_BROWSER_SWEEP: SaveSettings(); break;
     case IDC_AUTH: SaveSettings(); break;
+    case IDC_FORMAT: SaveSettings(); break;
     case IDC_QUALITY: SaveSettings(); break;
     }
 }

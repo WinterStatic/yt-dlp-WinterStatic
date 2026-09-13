@@ -1,8 +1,14 @@
 # WinterStatic yt-dlp Downloader public release checklist
 
-## 0.1.38 functional check
+## 0.1.39 functional check
 
-- Confirm the application title, About/version text, EXE metadata, manifest, build banner, BUILD-INFO, portable folder, and release ZIP names all report `0.1.38`.
+- Confirm the application title, About/version text, EXE metadata, manifest, build banner, BUILD-INFO, portable folder, and release ZIP names all report `0.1.39`.
+- Confirm the **Quality** and **Format** controls share one row cleanly at the normal window size.
+- Confirm Format offers **Automatic**, **Prefer MP4**, and **Prefer WebM**.
+- Confirm each tab keeps its own Format choice when switching between tabs.
+- Confirm a new tab inherits the selected tab's Format choice.
+- Confirm Nuke keeps the tab's Format choice while clearing the download state.
+- Upgrade from a settings file containing `Quality=Best MP4-compatible` and no `PreferredFormat` key. Confirm it opens as **Best quality + Prefer MP4**.
 - Start at least two downloads at the same time in separate tabs and confirm each tab keeps its own URL, output choices, progress, GUI log, PowerShell process, and completion state.
 - Switch repeatedly between active tabs and confirm one tab never shows another tab's progress or log.
 - Confirm the `+` tab creates a new reusable download tab and the 12-tab limit still works.
@@ -14,7 +20,7 @@
 - Close a running tab and confirm only that tab's PowerShell/yt-dlp process tree is stopped. Other downloads must continue.
 - Close the last remaining job tab and confirm a fresh blank download tab is created automatically.
 - Confirm **Nuke task** stops the selected tab's task and resets that tab to a clean ready state.
-- After Nuke, confirm the URL, progress, stage detail, and GUI log are cleared while output folder, quality, authentication, Browser sweep, and Close PowerShell on success choices are retained.
+- After Nuke, confirm the URL, progress, stage detail, and GUI log are cleared while output folder, quality, format preference, authentication, Browser sweep, and Close PowerShell on success choices are retained.
 - Confirm **Snap PowerShell right** still acts on the selected tab only.
 - Confirm automatic PowerShell placement still waits for a stable terminal window before moving it.
 - Close the main GUI while downloads are active and confirm the PowerShell/yt-dlp tasks continue running.
@@ -37,6 +43,9 @@
 - Keep a normal Edge window open and confirm it does not block WinterStatic account checks or authenticated downloads.
 - Open the dedicated WinterStatic Edge profile and confirm cookie reads/reset/authenticated startup wait until that dedicated window is closed.
 - Test one FFmpeg merge and one audio-only download.
+- Test **Prefer MP4** with Best quality and a capped quality mode. Confirm MP4/M4A is preferred when available and normal fallback still works when it is not.
+- Test **Prefer WebM** with Best quality and a capped quality mode. Confirm WebM is preferred when available and normal fallback still works when it is not.
+- Test audio-only with Prefer MP4 and Prefer WebM. Confirm M4A/WebM are preferred respectively without turning the preference into a hard failure.
 - Test one normal unsupported URL/static recovery case if a known target is available.
 - Test Browser sweep with a known target and confirm it remains off by default on a clean settings file.
 - Confirm Nuke, tab close, and another running download do not interfere with Browser sweep or authentication state belonging to other tabs.
@@ -47,15 +56,15 @@
 - Run `build-native.bat release` and confirm it creates:
 
 ```text
-WinterStatic-yt-dlp-Downloader-0.1.38-portable.zip
-WinterStatic-yt-dlp-Downloader-0.1.38-source.zip
+WinterStatic-yt-dlp-Downloader-0.1.39-portable.zip
+WinterStatic-yt-dlp-Downloader-0.1.39-source.zip
 ```
 
 - Open the portable ZIP and confirm it contains the EXE, clean settings, README, license, notices, BUILD-INFO, both yt-dlp backends, FFmpeg, and only a clean BrowserProfile area.
 - Open the source ZIP and confirm it contains only the public source/resources/build files listed by the release builder.
 - Confirm the source ZIP contains no `Tools`, browser cookies/profile data, downloaded media, generated EXE/OBJ/RES files, IDE files, or portable output folder.
 - Confirm `build-native.bat release` inside the source ZIP still supports release mode.
-- Replace `yt-dlp_winterstatic.png` with a final 0.1.38 screenshot before publication and check it for personal paths, account names, notifications, or other private information.
+- Replace `yt-dlp_winterstatic.png` with a final 0.1.39 screenshot before publication and check it for personal paths, account names, notifications, or other private information.
 
 ## Runtime and licensing check
 
@@ -68,7 +77,7 @@ WinterStatic-yt-dlp-Downloader-0.1.38-source.zip
 
 ## GitHub release check
 
-- Confirm the README version history includes 0.1.38 and contains only the public 0.1.x version history.
+- Confirm the README version history includes 0.1.39 and contains only the public 0.1.x version history.
 - Confirm the Git tag, release title, README version, EXE version, and asset filenames all agree.
 - Attach the portable ZIP and source ZIP generated by `build-native.bat release`.
 - Test both uploaded ZIPs after download before marking the release complete.

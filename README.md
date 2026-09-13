@@ -1,6 +1,6 @@
 # WinterStatic yt-dlp Downloader
 
-**Version 0.1.38**
+**Version 0.1.39**
 
 WinterStatic yt-dlp Downloader is a native C++17 / Win32 frontend for [`yt-dlp`](https://github.com/yt-dlp/yt-dlp). It provides a compact Windows GUI, multiple independent download tabs, FFmpeg support, authenticated YouTube downloads through a dedicated Microsoft Edge profile, and visible PowerShell task windows.
 
@@ -17,10 +17,11 @@ Project: https://github.com/WinterStatic/yt-dlp-WinterStatic
 - Tabs can be closed with their `x` button. Closing a running tab stops that tab's task before removing it.
 - Quality presets:
   - Best quality
-  - Best MP4-compatible
   - Maximum 1080p
   - Maximum 720p
   - Audio only (source format)
+- Independent format preference: Automatic, Prefer MP4, or Prefer WebM.
+- Format preferences are soft: WinterStatic tries the requested family first and falls back to the best available format rather than failing.
 - FFmpeg-aware format selection, stream merging, and audio extraction.
 - Automatic yt-dlp and FFmpeg setup when building the portable package.
 - Separate primary and authenticated yt-dlp backends for YouTube compatibility.
@@ -72,7 +73,7 @@ build-native.bat
 A successful build creates:
 
 ```text
-WinterStatic-yt-dlp-Downloader-0.1.38-portable
+WinterStatic-yt-dlp-Downloader-0.1.39-portable
 ```
 
 For a GitHub release, run:
@@ -84,8 +85,8 @@ build-native.bat release
 Release mode also creates:
 
 ```text
-WinterStatic-yt-dlp-Downloader-0.1.38-portable.zip
-WinterStatic-yt-dlp-Downloader-0.1.38-source.zip
+WinterStatic-yt-dlp-Downloader-0.1.39-portable.zip
+WinterStatic-yt-dlp-Downloader-0.1.39-source.zip
 ```
 
 The source ZIP contains the public frontend source, resources, build files, documentation, and screenshot. It does not include `Tools`, browser profile data, downloaded media, or generated build output.
@@ -142,19 +143,24 @@ Authentication modes:
 
 The dedicated WinterStatic Edge window must be closed before yt-dlp reads its cookie database. Normal Edge windows can remain open.
 
-## QUALITY MODES
+## QUALITY AND FORMAT
 
 **Best quality**  
 Lets yt-dlp choose its preferred video/audio combination.
-
-**Best MP4-compatible**  
-Prefers MP4 video and M4A audio and requests MP4 output when FFmpeg is available.
 
 **Maximum 1080p / Maximum 720p**  
 Uses the selected height limit while still allowing fallback formats when the preferred format is unavailable.
 
 **Audio only (source format)**  
 Selects the best audio stream. FFmpeg handles normal audio extraction when available.
+
+The separate **Format** selector controls container preference without turning it into a hard requirement:
+
+- **Automatic** lets yt-dlp choose normally.
+- **Prefer MP4** tries MP4 video with M4A audio first, then falls back to the best available formats. In audio-only mode, this preference tries M4A first.
+- **Prefer WebM** tries WebM video and audio first, then falls back to the best available formats.
+
+The preference applies independently of the quality cap, so combinations such as **Maximum 1080p + Prefer WebM** and **Best quality + Prefer MP4** are supported.
 
 ## DOWNLOAD RECOVERY
 
@@ -224,6 +230,7 @@ Each download tab tracks its own progress independently. The visible PowerShell 
 - yt-dlp path
 - FFmpeg path
 - quality preset
+- preferred format
 - authentication mode
 - Close PowerShell on success preference
 - Browser sweep preference
@@ -269,6 +276,15 @@ Before publishing a portable package containing third-party binaries, check `THI
 ## VERSION HISTORY
 
 0.1.37 was the first public GitHub release. Earlier 0.1.x versions were private development builds.
+
+### 0.1.39 - FORMAT PREFERENCE
+
+- Split container preference from the quality selector.
+- Added **Format** choices for Automatic, Prefer MP4, and Prefer WebM.
+- Format choices are soft preferences and fall back to the best available format instead of failing when the preferred family is unavailable.
+- Prefer MP4 uses M4A as the matching audio preference, including audio-only mode.
+- Existing 0.1.38 **Best MP4-compatible** settings migrate automatically to **Best quality + Prefer MP4**.
+- Kept format preference as independent per-tab state so concurrent download tabs can use different choices.
 
 ### 0.1.38 - MULTI-DOWNLOAD TABS AND PROGRESS RELIABILITY
 
